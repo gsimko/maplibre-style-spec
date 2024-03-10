@@ -34,18 +34,6 @@
         40.7736
       ]
     },
-    "centerAltitude": {
-      "type": "number",
-      "doc": "Default map center altitude in meters above sea level. The style center altitude defines the altitude where the camera is looking at and will be used only if the map has not been positioned by other means (e.g. map options or user interaction).",
-      "example": 123.4,
-      "sdk-support": {
-        "basic functionality": {
-          "js": "5.0.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/2980",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/2980"
-        }
-      }
-    },
     "zoom": {
       "type": "number",
       "doc": "Default zoom level.  The style zoom will be used only if the map has not been positioned by other means (e.g. map options or user interaction).",
@@ -64,38 +52,7 @@
       "default": 0,
       "units": "degrees",
       "doc": "Default pitch, in degrees. Zero is perpendicular to the surface, for a look straight down at the map, while a greater value like 60 looks ahead towards the horizon. The style pitch will be used only if the map has not been positioned by other means (e.g. map options or user interaction).",
-      "example": 50,
-      "sdk-support": {
-        "0-60 degrees": {
-          "js": "0.8.0",
-          "android": "1.0.0",
-          "ios": "1.0.0"
-        },
-        "0-85 degrees": {
-          "js": "2.0.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/1909",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/1909"
-        },
-        "0-180 degrees": {
-          "js": "5.0.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/1909",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/1909"
-        }
-      }
-    },
-    "roll": {
-      "type": "number",
-      "default": 0,
-      "units": "degrees",
-      "doc": "Default roll, in degrees. The roll angle is measured counterclockwise about the camera boresight. The style roll will be used only if the map has not been positioned by other means (e.g. map options or user interaction).",
-      "example": 45,
-      "sdk-support": {
-        "basic functionality": {
-          "js": "5.0.0",
-          "android": "https://github.com/maplibre/maplibre-native/issues/2941",
-          "ios": "https://github.com/maplibre/maplibre-native/issues/2941"
-        }
-      }
+      "example": 50
     },
     "light": {
       "type": "light",
@@ -127,15 +84,9 @@
     },
     "projection": {
       "type": "projection",
-      "doc": "The projection configuration",
+      "doc": "The projection configuration. **Note:** this definition is still experimental and is under development in maplibre-gl-js.",
       "example": {
-        "type": [
-          "interpolate",
-          ["linear"],
-          ["zoom"],
-          10, "vertical-perspective",
-          12, "mercator"
-        ]
+        "type": "globe"
       }
     },
     "terrain": {
@@ -203,7 +154,7 @@
         {
           "id": "coastline",
           "source": "maplibre",
-          "source-layer": "countries",
+          "source-layer": "contries",
           "type": "line",
           "paint": {
             "line-color": "#198EC8"
@@ -2196,8 +2147,8 @@
       "sdk-support": {
         "basic functionality": {
           "js": "3.3.0",
-          "ios": "6.8.0",
-          "android": "11.6.0"
+          "ios": "https://github.com/maplibre/maplibre-native/issues/2358",
+          "android": "https://github.com/maplibre/maplibre-native/issues/2358"
         },
         "data-driven styling": {
           "js": "3.3.0",
@@ -4272,7 +4223,7 @@
         }
       },
       "is-supported-script": {
-        "doc": "Returns `true` if the input string is expected to render legibly. Returns `false` if the input string contains sections that cannot be rendered without potential loss of meaning (e.g. Indic scripts that require complex text shaping, or right-to-left scripts if the `mapbox-gl-rtl-text` plugin is not in use in MapLibre GL JS).",
+        "doc": "Returns `true` if the input string is expected to render legibly. Returns `false` if the input string contains sections that cannot be rendered without potential loss of meaning (e.g. Indic scripts that require complex text shaping, or right-to-left scripts if the the `mapbox-gl-rtl-text` plugin is not in use in MapLibre GL JS).",
         "example": {
           "syntax": {
             "method": ["string"],
@@ -4553,7 +4504,7 @@
         ]
       },
       "transition": true,
-      "doc": "How to blend the sky color and the horizon color. Where 1 is blending the color at the middle of the sky and 0 is not blending at all and using the sky color only."
+      "doc": "How to blend the the sky color and the horizon color. Where 1 is blending the color at the middle of the sky and 0 is not blending at all and using the sky color only."
     },
     "atmosphere-blend": {
       "type": "number",
@@ -4600,16 +4551,16 @@
   },
   "projection": {
     "type": {
-      "type": "projectionDefinition",
-      "doc": "The projection definition type. Can be specified as a string, a transition state, or an expression.",
-      "default": "mercator",   
-      "property-type": "data-constant",
-      "transition": false,
-      "expression": {
-        "interpolated": true,
-        "parameters": [
-          "zoom"
-        ]
+      "type": "enum",
+      "doc": "The projection type.",
+      "default": "mercator",
+      "values": {
+        "mercator": {
+          "doc": "The Mercator projection."
+        },
+        "globe": {
+          "doc": "The globe projection."
+        }
       }
     }
   },
