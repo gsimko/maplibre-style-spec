@@ -631,6 +631,7 @@ export type VideoSourceSpecification = {
 			number
 		]
 	];
+	"priorSourceId"?: string;
 };
 export type ImageSourceSpecification = {
 	"type": "image";
@@ -653,6 +654,7 @@ export type ImageSourceSpecification = {
 			number
 		]
 	];
+	"priorSourceId"?: string;
 };
 export type SourceSpecification = VectorSourceSpecification | RasterSourceSpecification | RasterDEMSourceSpecification | GeoJSONSourceSpecification | VideoSourceSpecification | ImageSourceSpecification;
 export type FillLayerSpecification = {

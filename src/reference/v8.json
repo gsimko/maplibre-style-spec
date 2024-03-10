@@ -607,6 +607,10 @@
         "value": "number",
         "doc": "A single longitude, latitude pair."
       }
+    },
+    "priorSourceId": {
+      "type": "string",
+      "doc": "ID of a source that must be shown prior to this"
     }
   },
   "source_image": {
@@ -636,6 +640,10 @@
         "value": "number",
         "doc": "A single longitude, latitude pair."
       }
+    },
+    "priorSourceId": {
+      "type": "string",
+      "doc": "ID of a source that must be shown prior to this"
     }
   },
   "layer": {

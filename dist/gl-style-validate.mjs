@@ -5983,6 +5983,9 @@ var source_video = {
 			length: 2,
 			value: "number"
 		}
+	},
+	priorSourceId: {
+		type: "string"
 	}
 };
 var source_image = {
@@ -6007,6 +6010,9 @@ var source_image = {
 			length: 2,
 			value: "number"
 		}
+	},
+	priorSourceId: {
+		type: "string"
 	}
 };
 var layer = {
