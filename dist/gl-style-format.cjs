@@ -312,6 +312,9 @@
 		sky: {
 			type: "sky"
 		},
+		projection: {
+			type: "projection"
+		},
 		terrain: {
 			type: "terrain"
 		},
@@ -1867,8 +1870,6 @@
 			has: {
 			},
 			"!has": {
-			},
-			within: {
 			}
 		}
 	};
@@ -1975,6 +1976,18 @@
 			},
 			transition: true
 		},
+		"horizon-color": {
+			type: "color",
+			"property-type": "data-constant",
+			"default": "#ffffff",
+			expression: {
+				interpolated: true,
+				parameters: [
+					"zoom"
+				]
+			},
+			transition: true
+		},
 		"fog-color": {
 			type: "color",
 			"property-type": "data-constant",
@@ -1987,7 +2000,7 @@
 			},
 			transition: true
 		},
-		"fog-blend": {
+		"fog-ground-blend": {
 			type: "number",
 			"property-type": "data-constant",
 			"default": 0.5,
@@ -2001,7 +2014,35 @@
 			},
 			transition: true
 		},
-		"horizon-blend": {
+		"horizon-fog-blend": {
+			type: "number",
+			"property-type": "data-constant",
+			"default": 0.8,
+			minimum: 0,
+			maximum: 1,
+			expression: {
+				interpolated: true,
+				parameters: [
+					"zoom"
+				]
+			},
+			transition: true
+		},
+		"sky-horizon-blend": {
+			type: "number",
+			"property-type": "data-constant",
+			"default": 0.8,
+			minimum: 0,
+			maximum: 1,
+			expression: {
+				interpolated: true,
+				parameters: [
+					"zoom"
+				]
+			},
+			transition: true
+		},
+		"atmosphere-blend": {
 			type: "number",
 			"property-type": "data-constant",
 			"default": 0.8,
@@ -2025,6 +2066,18 @@
 			type: "number",
 			minimum: 0,
 			"default": 1
+		}
+	};
+	var projection = {
+		type: {
+			type: "enum",
+			"default": "mercator",
+			values: {
+				mercator: {
+				},
+				globe: {
+				}
+			}
 		}
 	};
 	var paint = [
@@ -3245,6 +3298,7 @@
 		light: light,
 		sky: sky,
 		terrain: terrain,
+		projection: projection,
 		paint: paint,
 		paint_fill: paint_fill,
 		"paint_fill-extrusion": {
