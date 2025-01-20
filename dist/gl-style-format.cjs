@@ -292,6 +292,9 @@
 			type: "array",
 			value: "number"
 		},
+		centerAltitude: {
+			type: "number"
+		},
 		zoom: {
 			type: "number"
 		},
@@ -302,6 +305,11 @@
 			units: "degrees"
 		},
 		pitch: {
+			type: "number",
+			"default": 0,
+			units: "degrees"
+		},
+		roll: {
 			type: "number",
 			"default": 0,
 			units: "degrees"
@@ -2070,13 +2078,15 @@
 	};
 	var projection = {
 		type: {
-			type: "enum",
+			type: "projectionDefinition",
 			"default": "mercator",
-			values: {
-				mercator: {
-				},
-				globe: {
-				}
+			"property-type": "data-constant",
+			transition: false,
+			expression: {
+				interpolated: true,
+				parameters: [
+					"zoom"
+				]
 			}
 		}
 	};
@@ -3208,7 +3218,7 @@
 			type: "string"
 		}
 	};
-	var spec = {
+	var latest = {
 		$version: $version,
 		$root: $root,
 		sources: sources,
@@ -3599,9 +3609,9 @@
 	 * fs.writeFileSync('./dest.min.json', format(style, 0));
 	 */
 	function format(style, space = 2) {
-	    style = sortKeysBy(style, spec.$root);
+	    style = sortKeysBy(style, latest.$root);
 	    if (style.layers) {
-	        style.layers = style.layers.map((layer) => sortKeysBy(layer, spec.layer));
+	        style.layers = style.layers.map((layer) => sortKeysBy(layer, latest.layer));
 	    }
 	    return stringify(style, { indent: space });
 	}

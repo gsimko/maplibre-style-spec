@@ -539,6 +539,7 @@
 	const StringType = { kind: 'string' };
 	const BooleanType = { kind: 'boolean' };
 	const ColorType = { kind: 'color' };
+	const ProjectionDefinitionType = { kind: 'projectionDefinition' };
 	const ObjectType = { kind: 'object' };
 	const ValueType = { kind: 'value' };
 	const ErrorType = { kind: 'error' };
@@ -547,16 +548,16 @@
 	const PaddingType = { kind: 'padding' };
 	const ResolvedImageType = { kind: 'resolvedImage' };
 	const VariableAnchorOffsetCollectionType = { kind: 'variableAnchorOffsetCollection' };
-	function array$1(itemType, N) {
+	function array(itemType, N) {
 	    return {
 	        kind: 'array',
 	        itemType,
 	        N
 	    };
 	}
-	function toString$1(type) {
+	function typeToString(type) {
 	    if (type.kind === 'array') {
-	        const itemType = toString$1(type.itemType);
+	        const itemType = typeToString(type.itemType);
 	        return typeof type.N === 'number' ?
 	            `array<${itemType}, ${type.N}>` :
 	            type.itemType.kind === 'value' ? 'array' : `array<${itemType}>`;
@@ -571,9 +572,10 @@
 	    StringType,
 	    BooleanType,
 	    ColorType,
+	    ProjectionDefinitionType,
 	    FormattedType,
 	    ObjectType,
-	    array$1(ValueType),
+	    array(ValueType),
 	    PaddingType,
 	    ResolvedImageType,
 	    VariableAnchorOffsetCollectionType
@@ -605,7 +607,7 @@
 	            }
 	        }
 	    }
-	    return `Expected ${toString$1(expected)} but found ${toString$1(t)} instead.`;
+	    return `Expected ${typeToString(expected)} but found ${typeToString(t)} instead.`;
 	}
 	function isValidType(provided, allowedTypes) {
 	    return allowedTypes.some(t => t.kind === provided.kind);
@@ -1033,6 +1035,15 @@
 	    yellowgreen: [154, 205, 50],
 	};
 
+	function interpolateNumber(from, to, t) {
+	    return from + t * (to - from);
+	}
+	function interpolateArray(from, to, t) {
+	    return from.map((d, i) => {
+	        return interpolateNumber(d, to[i], t);
+	    });
+	}
+
 	/**
 	 * Color representation used by WebGL.
 	 * Defined in sRGB color space and pre-blended with alpha.
@@ -1154,6 +1165,54 @@
 	        const [r, g, b, a] = this.rgb;
 	        return `rgba(${[r, g, b].map(n => Math.round(n * 255)).join(',')},${a})`;
 	    }
+	    static interpolate(from, to, t, spaceKey = 'rgb') {
+	        switch (spaceKey) {
+	            case 'rgb': {
+	                const [r, g, b, alpha] = interpolateArray(from.rgb, to.rgb, t);
+	                return new Color(r, g, b, alpha, false);
+	            }
+	            case 'hcl': {
+	                const [hue0, chroma0, light0, alphaF] = from.hcl;
+	                const [hue1, chroma1, light1, alphaT] = to.hcl;
+	                // https://github.com/gka/chroma.js/blob/cd1b3c0926c7a85cbdc3b1453b3a94006de91a92/src/interpolator/_hsx.js
+	                let hue, chroma;
+	                if (!isNaN(hue0) && !isNaN(hue1)) {
+	                    let dh = hue1 - hue0;
+	                    if (hue1 > hue0 && dh > 180) {
+	                        dh -= 360;
+	                    }
+	                    else if (hue1 < hue0 && hue0 - hue1 > 180) {
+	                        dh += 360;
+	                    }
+	                    hue = hue0 + t * dh;
+	                }
+	                else if (!isNaN(hue0)) {
+	                    hue = hue0;
+	                    if (light1 === 1 || light1 === 0)
+	                        chroma = chroma0;
+	                }
+	                else if (!isNaN(hue1)) {
+	                    hue = hue1;
+	                    if (light0 === 1 || light0 === 0)
+	                        chroma = chroma1;
+	                }
+	                else {
+	                    hue = NaN;
+	                }
+	                const [r, g, b, alpha] = hclToRgb([
+	                    hue,
+	                    chroma !== null && chroma !== void 0 ? chroma : interpolateNumber(chroma0, chroma1, t),
+	                    interpolateNumber(light0, light1, t),
+	                    interpolateNumber(alphaF, alphaT, t),
+	                ]);
+	                return new Color(r, g, b, alpha, false);
+	            }
+	            case 'lab': {
+	                const [r, g, b, alpha] = labToRgb(interpolateArray(from.lab, to.lab, t));
+	                return new Color(r, g, b, alpha, false);
+	            }
+	        }
+	    }
 	}
 	Color.black = new Color(0, 0, 0, 1);
 	Color.white = new Color(1, 1, 1, 1);
@@ -1270,6 +1329,19 @@
 	    toString() {
 	        return JSON.stringify(this.values);
 	    }
+	    static interpolate(from, to, t) {
+	        return new Padding(interpolateArray(from.values, to.values, t));
+	    }
+	}
+
+	class RuntimeError {
+	    constructor(message) {
+	        this.name = 'ExpressionEvaluationError';
+	        this.message = message;
+	    }
+	    toJSON() {
+	        return this.message;
+	    }
 	}
 
 	/** Set of valid anchor positions, as a set for validation */
@@ -1308,6 +1380,26 @@
 	    toString() {
 	        return JSON.stringify(this.values);
 	    }
+	    static interpolate(from, to, t) {
+	        const fromValues = from.values;
+	        const toValues = to.values;
+	        if (fromValues.length !== toValues.length) {
+	            throw new RuntimeError(`Cannot interpolate values of different length. from: ${from.toString()}, to: ${to.toString()}`);
+	        }
+	        const output = [];
+	        for (let i = 0; i < fromValues.length; i += 2) {
+	            // Anchor entries must match
+	            if (fromValues[i] !== toValues[i]) {
+	                throw new RuntimeError(`Cannot interpolate values containing mismatched anchors. from[${i}]: ${fromValues[i]}, to[${i}]: ${toValues[i]}`);
+	            }
+	            output.push(fromValues[i]);
+	            // Interpolate the offset values for each anchor
+	            const [fx, fy] = fromValues[i + 1];
+	            const [tx, ty] = toValues[i + 1];
+	            output.push([interpolateNumber(fx, tx, t), interpolateNumber(fy, ty, t)]);
+	        }
+	        return new VariableAnchorOffsetCollection(output);
+	    }
 	}
 
 	class ResolvedImage {
@@ -1322,6 +1414,32 @@
 	        if (!name)
 	            return null; // treat empty values as no image
 	        return new ResolvedImage({ name, available: false });
+	    }
+	}
+
+	class ProjectionDefinition {
+	    constructor(from, to, transition) {
+	        this.from = from;
+	        this.to = to;
+	        this.transition = transition;
+	    }
+	    static interpolate(from, to, t) {
+	        return new ProjectionDefinition(from, to, t);
+	    }
+	    static parse(input) {
+	        if (input instanceof ProjectionDefinition) {
+	            return input;
+	        }
+	        if (Array.isArray(input) && input.length === 3 && typeof input[0] === 'string' && typeof input[1] === 'string' && typeof input[2] === 'number') {
+	            return new ProjectionDefinition(input[0], input[1], input[2]);
+	        }
+	        if (typeof input === 'object' && typeof input.from === 'string' && typeof input.to === 'string' && typeof input.transition === 'number') {
+	            return new ProjectionDefinition(input.from, input.to, input.transition);
+	        }
+	        if (typeof input === 'string') {
+	            return new ProjectionDefinition(input, input, 1);
+	        }
+	        return undefined;
 	    }
 	}
 
@@ -1342,6 +1460,7 @@
 	        typeof mixed === 'string' ||
 	        typeof mixed === 'boolean' ||
 	        typeof mixed === 'number' ||
+	        mixed instanceof ProjectionDefinition ||
 	        mixed instanceof Color ||
 	        mixed instanceof Collator ||
 	        mixed instanceof Formatted ||
@@ -1386,6 +1505,9 @@
 	    else if (value instanceof Color) {
 	        return ColorType;
 	    }
+	    else if (value instanceof ProjectionDefinition) {
+	        return ProjectionDefinitionType;
+	    }
 	    else if (value instanceof Collator) {
 	        return CollatorType;
 	    }
@@ -1417,13 +1539,13 @@
 	                break;
 	            }
 	        }
-	        return array$1(itemType || ValueType, length);
+	        return array(itemType || ValueType, length);
 	    }
 	    else {
 	        return ObjectType;
 	    }
 	}
-	function toString(value) {
+	function valueToString(value) {
 	    const type = typeof value;
 	    if (value === null) {
 	        return '';
@@ -1431,7 +1553,7 @@
 	    else if (type === 'string' || type === 'number' || type === 'boolean') {
 	        return String(value);
 	    }
-	    else if (value instanceof Color || value instanceof Formatted || value instanceof Padding || value instanceof VariableAnchorOffsetCollection || value instanceof ResolvedImage) {
+	    else if (value instanceof Color || value instanceof ProjectionDefinition || value instanceof Formatted || value instanceof Padding || value instanceof VariableAnchorOffsetCollection || value instanceof ResolvedImage) {
 	        return value.toString();
 	    }
 	    else {
@@ -1468,16 +1590,6 @@
 	    eachChild() { }
 	    outputDefined() {
 	        return true;
-	    }
-	}
-
-	class RuntimeError {
-	    constructor(message) {
-	        this.name = 'ExpressionEvaluationError';
-	        this.message = message;
-	    }
-	    toJSON() {
-	        return this.message;
 	    }
 	}
 
@@ -1521,7 +1633,7 @@
 	                N = args[2];
 	                i++;
 	            }
-	            type = array$1(itemType, N);
+	            type = array(itemType, N);
 	        }
 	        else {
 	            if (!types$1[name])
@@ -1545,7 +1657,7 @@
 	                return value;
 	            }
 	            else if (i === this.args.length - 1) {
-	                throw new RuntimeError(`Expected value to be of type ${toString$1(this.type)}, but found ${toString$1(typeOf(value))} instead.`);
+	                throw new RuntimeError(`Expected value to be of type ${typeToString(this.type)}, but found ${typeToString(typeOf(value))} instead.`);
 	            }
 	        }
 	        throw new Error();
@@ -1664,11 +1776,13 @@
 	            case 'formatted':
 	                // There is no explicit 'to-formatted' but this coercion can be implicitly
 	                // created by properties that expect the 'formatted' type.
-	                return Formatted.fromString(toString(this.args[0].evaluate(ctx)));
+	                return Formatted.fromString(valueToString(this.args[0].evaluate(ctx)));
 	            case 'resolvedImage':
-	                return ResolvedImage.fromString(toString(this.args[0].evaluate(ctx)));
+	                return ResolvedImage.fromString(valueToString(this.args[0].evaluate(ctx)));
+	            case 'projectionDefinition':
+	                return this.args[0].evaluate(ctx);
 	            default:
-	                return toString(this.args[0].evaluate(ctx));
+	                return valueToString(this.args[0].evaluate(ctx));
 	        }
 	    }
 	    eachChild(fn) {
@@ -1679,7 +1793,92 @@
 	    }
 	}
 
+	/**
+	 * Classifies an array of rings into polygons with outer rings and holes
+	 * @param rings - the rings to classify
+	 * @param maxRings - the maximum number of rings to include in a polygon, use 0 to include all rings
+	 * @returns an array of polygons with internal rings as holes
+	 */
+	function classifyRings(rings, maxRings) {
+	    const len = rings.length;
+	    if (len <= 1)
+	        return [rings];
+	    const polygons = [];
+	    let polygon;
+	    let ccw;
+	    for (const ring of rings) {
+	        const area = calculateSignedArea(ring);
+	        if (area === 0)
+	            continue;
+	        ring.area = Math.abs(area);
+	        if (ccw === undefined)
+	            ccw = area < 0;
+	        if (ccw === area < 0) {
+	            if (polygon)
+	                polygons.push(polygon);
+	            polygon = [ring];
+	        }
+	        else {
+	            polygon.push(ring);
+	        }
+	    }
+	    if (polygon)
+	        polygons.push(polygon);
+	    return polygons;
+	}
+	/**
+	 * Returns the signed area for the polygon ring.  Positive areas are exterior rings and
+	 * have a clockwise winding.  Negative areas are interior rings and have a counter clockwise
+	 * ordering.
+	 *
+	 * @param ring - Exterior or interior ring
+	 * @returns Signed area
+	 */
+	function calculateSignedArea(ring) {
+	    let sum = 0;
+	    for (let i = 0, len = ring.length, j = len - 1, p1, p2; i < len; j = i++) {
+	        p1 = ring[i];
+	        p2 = ring[j];
+	        sum += (p2.x - p1.x) * (p1.y + p2.y);
+	    }
+	    return sum;
+	}
+	/**
+	 * Returns if there are multiple outer rings.
+	 * The first ring is an outer ring. Its direction, cw or ccw, defines the direction of outer rings.
+	 *
+	 * @param rings - List of rings
+	 * @returns Are there multiple outer rings
+	 */
+	function hasMultipleOuterRings(rings) {
+	    // Following https://github.com/mapbox/vector-tile-js/blob/77851380b63b07fd0af3d5a3f144cc86fb39fdd1/lib/vectortilefeature.js#L197
+	    const len = rings.length;
+	    for (let i = 0, direction; i < len; i++) {
+	        const area = calculateSignedArea(rings[i]);
+	        if (area === 0)
+	            continue;
+	        if (direction === undefined) {
+	            // Keep the direction of the first ring
+	            direction = area < 0;
+	        }
+	        else if (direction === area < 0) {
+	            // Same direction as the first ring -> a second outer ring
+	            return true;
+	        }
+	    }
+	    return false;
+	}
+
 	const geometryTypes = ['Unknown', 'Point', 'LineString', 'Polygon'];
+	const simpleGeometryType = {
+	    'Unknown': 'Unknown',
+	    'Point': 'Point',
+	    'MultiPoint': 'Point',
+	    'LineString': 'LineString',
+	    'MultiLineString': 'LineString',
+	    'Polygon': 'Polygon',
+	    'MultiPolygon': 'Polygon'
+	};
 	class EvaluationContext {
 	    constructor() {
 	        this.globals = null;
@@ -1693,8 +1892,32 @@
 	    id() {
 	        return this.feature && 'id' in this.feature ? this.feature.id : null;
 	    }
+	    geometryDollarType() {
+	        return this.feature ?
+	            typeof this.feature.type === 'number' ? geometryTypes[this.feature.type] : simpleGeometryType[this.feature.type] :
+	            null;
+	    }
 	    geometryType() {
-	        return this.feature ? typeof this.feature.type === 'number' ? geometryTypes[this.feature.type] : this.feature.type : null;
+	        let geometryType = this.feature.type;
+	        if (typeof geometryType !== 'number') {
+	            return geometryType;
+	        }
+	        geometryType = geometryTypes[this.feature.type];
+	        if (geometryType === 'Unknown') {
+	            return geometryType;
+	        }
+	        const geom = this.geometry();
+	        const len = geom.length;
+	        if (len === 1) {
+	            return geometryType;
+	        }
+	        if (geometryType !== 'Polygon') {
+	            return `Multi${geometryType}`;
+	        }
+	        if (hasMultipleOuterRings(geom)) {
+	            return 'MultiPolygon';
+	        }
+	        return 'Polygon';
 	    }
 	    geometry() {
 	        return this.feature && 'geometry' in this.feature ? this.feature.geometry : null;
@@ -1783,6 +2006,9 @@
 	                    //
 	                    if ((expected.kind === 'string' || expected.kind === 'number' || expected.kind === 'boolean' || expected.kind === 'object' || expected.kind === 'array') && actual.kind === 'value') {
 	                        parsed = annotate(parsed, expected, options.typeAnnotation || 'assert');
+	                    }
+	                    else if ((expected.kind === 'projectionDefinition') && (actual.kind === 'string' || actual.kind === 'array')) {
+	                        parsed = annotate(parsed, expected, options.typeAnnotation || 'coerce');
 	                    }
 	                    else if ((expected.kind === 'color' || expected.kind === 'formatted' || expected.kind === 'resolvedImage') && (actual.kind === 'value' || actual.kind === 'string')) {
 	                        parsed = annotate(parsed, expected, options.typeAnnotation || 'coerce');
@@ -1940,7 +2166,7 @@
 	        if (args.length !== 3)
 	            return context.error(`Expected 2 arguments, but found ${args.length - 1} instead.`);
 	        const index = context.parse(args[1], 1, NumberType);
-	        const input = context.parse(args[2], 2, array$1(context.expectedType || ValueType));
+	        const input = context.parse(args[2], 2, array(context.expectedType || ValueType));
 	        if (!index || !input)
 	            return null;
 	        const t = input.type;
@@ -1984,7 +2210,7 @@
 	        if (!needle || !haystack)
 	            return null;
 	        if (!isValidType(needle.type, [BooleanType, StringType, NumberType, NullType, ValueType])) {
-	            return context.error(`Expected first argument to be of type boolean, string, number or null, but found ${toString$1(needle.type)} instead`);
+	            return context.error(`Expected first argument to be of type boolean, string, number or null, but found ${typeToString(needle.type)} instead`);
 	        }
 	        return new In(needle, haystack);
 	    }
@@ -1994,10 +2220,10 @@
 	        if (!haystack)
 	            return false;
 	        if (!isValidNativeType(needle, ['boolean', 'string', 'number', 'null'])) {
-	            throw new RuntimeError(`Expected first argument to be of type boolean, string, number or null, but found ${toString$1(typeOf(needle))} instead.`);
+	            throw new RuntimeError(`Expected first argument to be of type boolean, string, number or null, but found ${typeToString(typeOf(needle))} instead.`);
 	        }
 	        if (!isValidNativeType(haystack, ['string', 'array'])) {
-	            throw new RuntimeError(`Expected second argument to be of type array or string, but found ${toString$1(typeOf(haystack))} instead.`);
+	            throw new RuntimeError(`Expected second argument to be of type array or string, but found ${typeToString(typeOf(haystack))} instead.`);
 	        }
 	        return haystack.indexOf(needle) >= 0;
 	    }
@@ -2026,7 +2252,7 @@
 	        if (!needle || !haystack)
 	            return null;
 	        if (!isValidType(needle.type, [BooleanType, StringType, NumberType, NullType, ValueType])) {
-	            return context.error(`Expected first argument to be of type boolean, string, number or null, but found ${toString$1(needle.type)} instead`);
+	            return context.error(`Expected first argument to be of type boolean, string, number or null, but found ${typeToString(needle.type)} instead`);
 	        }
 	        if (args.length === 4) {
 	            const fromIndex = context.parse(args[3], 3, NumberType);
@@ -2042,7 +2268,7 @@
 	        const needle = this.needle.evaluate(ctx);
 	        const haystack = this.haystack.evaluate(ctx);
 	        if (!isValidNativeType(needle, ['boolean', 'string', 'number', 'null'])) {
-	            throw new RuntimeError(`Expected first argument to be of type boolean, string, number or null, but found ${toString$1(typeOf(needle))} instead.`);
+	            throw new RuntimeError(`Expected first argument to be of type boolean, string, number or null, but found ${typeToString(typeOf(needle))} instead.`);
 	        }
 	        let fromIndex;
 	        if (this.fromIndex) {
@@ -2062,7 +2288,7 @@
 	            return haystack.indexOf(needle, fromIndex);
 	        }
 	        else {
-	            throw new RuntimeError(`Expected second argument to be of type array or string, but found ${toString$1(typeOf(haystack))} instead.`);
+	            throw new RuntimeError(`Expected second argument to be of type array or string, but found ${typeToString(typeOf(haystack))} instead.`);
 	        }
 	    }
 	    eachChild(fn) {
@@ -2229,8 +2455,8 @@
 	        const beginIndex = context.parse(args[2], 2, NumberType);
 	        if (!input || !beginIndex)
 	            return null;
-	        if (!isValidType(input.type, [array$1(ValueType), StringType, ValueType])) {
-	            return context.error(`Expected first argument to be of type array or string, but found ${toString$1(input.type)} instead`);
+	        if (!isValidType(input.type, [array(ValueType), StringType, ValueType])) {
+	            return context.error(`Expected first argument to be of type array or string, but found ${typeToString(input.type)} instead`);
 	        }
 	        if (args.length === 4) {
 	            const endIndex = context.parse(args[3], 3, NumberType);
@@ -2257,7 +2483,7 @@
 	            return input.slice(beginIndex, endIndex);
 	        }
 	        else {
-	            throw new RuntimeError(`Expected first argument to be of type array or string, but found ${toString$1(typeOf(input))} instead.`);
+	            throw new RuntimeError(`Expected first argument to be of type array or string, but found ${typeToString(typeOf(input))} instead.`);
 	        }
 	    }
 	    eachChild(fn) {
@@ -2454,93 +2680,6 @@
 
 	var UnitBezier$1 = /*@__PURE__*/getDefaultExportFromCjs(unitbezier);
 
-	function number(from, to, t) {
-	    return from + t * (to - from);
-	}
-	function color(from, to, t, spaceKey = 'rgb') {
-	    switch (spaceKey) {
-	        case 'rgb': {
-	            const [r, g, b, alpha] = array(from.rgb, to.rgb, t);
-	            return new Color(r, g, b, alpha, false);
-	        }
-	        case 'hcl': {
-	            const [hue0, chroma0, light0, alphaF] = from.hcl;
-	            const [hue1, chroma1, light1, alphaT] = to.hcl;
-	            // https://github.com/gka/chroma.js/blob/cd1b3c0926c7a85cbdc3b1453b3a94006de91a92/src/interpolator/_hsx.js
-	            let hue, chroma;
-	            if (!isNaN(hue0) && !isNaN(hue1)) {
-	                let dh = hue1 - hue0;
-	                if (hue1 > hue0 && dh > 180) {
-	                    dh -= 360;
-	                }
-	                else if (hue1 < hue0 && hue0 - hue1 > 180) {
-	                    dh += 360;
-	                }
-	                hue = hue0 + t * dh;
-	            }
-	            else if (!isNaN(hue0)) {
-	                hue = hue0;
-	                if (light1 === 1 || light1 === 0)
-	                    chroma = chroma0;
-	            }
-	            else if (!isNaN(hue1)) {
-	                hue = hue1;
-	                if (light0 === 1 || light0 === 0)
-	                    chroma = chroma1;
-	            }
-	            else {
-	                hue = NaN;
-	            }
-	            const [r, g, b, alpha] = hclToRgb([
-	                hue,
-	                chroma !== null && chroma !== void 0 ? chroma : number(chroma0, chroma1, t),
-	                number(light0, light1, t),
-	                number(alphaF, alphaT, t),
-	            ]);
-	            return new Color(r, g, b, alpha, false);
-	        }
-	        case 'lab': {
-	            const [r, g, b, alpha] = labToRgb(array(from.lab, to.lab, t));
-	            return new Color(r, g, b, alpha, false);
-	        }
-	    }
-	}
-	function array(from, to, t) {
-	    return from.map((d, i) => {
-	        return number(d, to[i], t);
-	    });
-	}
-	function padding(from, to, t) {
-	    return new Padding(array(from.values, to.values, t));
-	}
-	function variableAnchorOffsetCollection(from, to, t) {
-	    const fromValues = from.values;
-	    const toValues = to.values;
-	    if (fromValues.length !== toValues.length) {
-	        throw new RuntimeError(`Cannot interpolate values of different length. from: ${from.toString()}, to: ${to.toString()}`);
-	    }
-	    const output = [];
-	    for (let i = 0; i < fromValues.length; i += 2) {
-	        // Anchor entries must match
-	        if (fromValues[i] !== toValues[i]) {
-	            throw new RuntimeError(`Cannot interpolate values containing mismatched anchors. from[${i}]: ${fromValues[i]}, to[${i}]: ${toValues[i]}`);
-	        }
-	        output.push(fromValues[i]);
-	        // Interpolate the offset values for each anchor
-	        const [fx, fy] = fromValues[i + 1];
-	        const [tx, ty] = toValues[i + 1];
-	        output.push([number(fx, tx, t), number(fy, ty, t)]);
-	    }
-	    return new VariableAnchorOffsetCollection(output);
-	}
-	const interpolate = {
-	    number,
-	    color,
-	    array,
-	    padding,
-	    variableAnchorOffsetCollection
-	};
-
 	class Interpolate {
 	    constructor(type, operator, interpolation, input, stops) {
 	        this.type = type;
@@ -2635,11 +2774,12 @@
 	            stops.push([label, parsed]);
 	        }
 	        if (!verifyType(outputType, NumberType) &&
+	            !verifyType(outputType, ProjectionDefinitionType) &&
 	            !verifyType(outputType, ColorType) &&
 	            !verifyType(outputType, PaddingType) &&
 	            !verifyType(outputType, VariableAnchorOffsetCollectionType) &&
-	            !verifyType(outputType, array$1(NumberType))) {
-	            return context.error(`Type ${toString$1(outputType)} is not interpolatable.`);
+	            !verifyType(outputType, array(NumberType))) {
+	            return context.error(`Type ${typeToString(outputType)} is not interpolatable.`);
 	        }
 	        return new Interpolate(outputType, operator, interpolation, input, stops);
 	    }
@@ -2665,11 +2805,24 @@
 	        const outputUpper = outputs[index + 1].evaluate(ctx);
 	        switch (this.operator) {
 	            case 'interpolate':
-	                return interpolate[this.type.kind](outputLower, outputUpper, t);
+	                switch (this.type.kind) {
+	                    case 'number':
+	                        return interpolateNumber(outputLower, outputUpper, t);
+	                    case 'color':
+	                        return Color.interpolate(outputLower, outputUpper, t);
+	                    case 'padding':
+	                        return Padding.interpolate(outputLower, outputUpper, t);
+	                    case 'variableAnchorOffsetCollection':
+	                        return VariableAnchorOffsetCollection.interpolate(outputLower, outputUpper, t);
+	                    case 'array':
+	                        return interpolateArray(outputLower, outputUpper, t);
+	                    case 'projectionDefinition':
+	                        return ProjectionDefinition.interpolate(outputLower, outputUpper, t);
+	                }
 	            case 'interpolate-hcl':
-	                return interpolate.color(outputLower, outputUpper, t, 'hcl');
+	                return Color.interpolate(outputLower, outputUpper, t, 'hcl');
 	            case 'interpolate-lab':
-	                return interpolate.color(outputLower, outputUpper, t, 'lab');
+	                return Color.interpolate(outputLower, outputUpper, t, 'lab');
 	        }
 	    }
 	    eachChild(fn) {
@@ -2730,6 +2883,13 @@
 	        return (Math.pow(base, progress) - 1) / (Math.pow(base, difference) - 1);
 	    }
 	}
+	({
+	    color: Color.interpolate,
+	    number: interpolateNumber,
+	    padding: Padding.interpolate,
+	    variableAnchorOffsetCollection: VariableAnchorOffsetCollection.interpolate,
+	    array: interpolateArray
+	});
 
 	class Coalesce {
 	    constructor(type, args) {
@@ -2860,18 +3020,18 @@
 	            if (!lhs)
 	                return null;
 	            if (!isComparableType(op, lhs.type)) {
-	                return context.concat(1).error(`"${op}" comparisons are not supported for type '${toString$1(lhs.type)}'.`);
+	                return context.concat(1).error(`"${op}" comparisons are not supported for type '${typeToString(lhs.type)}'.`);
 	            }
 	            let rhs = context.parse(args[2], 2, ValueType);
 	            if (!rhs)
 	                return null;
 	            if (!isComparableType(op, rhs.type)) {
-	                return context.concat(2).error(`"${op}" comparisons are not supported for type '${toString$1(rhs.type)}'.`);
+	                return context.concat(2).error(`"${op}" comparisons are not supported for type '${typeToString(rhs.type)}'.`);
 	            }
 	            if (lhs.type.kind !== rhs.type.kind &&
 	                lhs.type.kind !== 'value' &&
 	                rhs.type.kind !== 'value') {
-	                return context.error(`Cannot compare types '${toString$1(lhs.type)}' and '${toString$1(rhs.type)}'.`);
+	                return context.error(`Cannot compare types '${typeToString(lhs.type)}' and '${typeToString(rhs.type)}'.`);
 	            }
 	            if (isOrderComparison) {
 	                // typing rules specific to less/greater than operators
@@ -3084,7 +3244,7 @@
 	                }
 	                let font = null;
 	                if (arg['text-font']) {
-	                    font = context.parse(arg['text-font'], 1, array$1(StringType));
+	                    font = context.parse(arg['text-font'], 1, array(StringType));
 	                    if (!font)
 	                        return null;
 	                }
@@ -3118,7 +3278,7 @@
 	            if (typeOf(evaluatedContent) === ResolvedImageType) {
 	                return new FormattedSection('', evaluatedContent, null, null, null);
 	            }
-	            return new FormattedSection(toString(evaluatedContent), null, section.scale ? section.scale.evaluate(ctx) : null, section.font ? section.font.evaluate(ctx).join(',') : null, section.textColor ? section.textColor.evaluate(ctx) : null);
+	            return new FormattedSection(valueToString(evaluatedContent), null, section.scale ? section.scale.evaluate(ctx) : null, section.font ? section.font.evaluate(ctx).join(',') : null, section.textColor ? section.textColor.evaluate(ctx) : null);
 	        };
 	        return new Formatted(this.sections.map(evaluateSection));
 	    }
@@ -3185,7 +3345,7 @@
 	        if (!input)
 	            return null;
 	        if (input.type.kind !== 'array' && input.type.kind !== 'string' && input.type.kind !== 'value')
-	            return context.error(`Expected argument of type string or array, but found ${toString$1(input.type)} instead.`);
+	            return context.error(`Expected argument of type string or array, but found ${typeToString(input.type)} instead.`);
 	        return new Length(input);
 	    }
 	    evaluate(ctx) {
@@ -3198,7 +3358,7 @@
 	            return input.length;
 	        }
 	        else {
-	            throw new RuntimeError(`Expected value to be of type string or array, but found ${toString$1(typeOf(input))} instead.`);
+	            throw new RuntimeError(`Expected value to be of type string or array, but found ${typeToString(typeOf(input))} instead.`);
 	        }
 	    }
 	    eachChild(fn) {
@@ -3517,10 +3677,10 @@
 	    }
 	    evaluate(ctx) {
 	        if (ctx.geometry() != null && ctx.canonicalID() != null) {
-	            if (ctx.geometryType() === 'Point') {
+	            if (ctx.geometryDollarType() === 'Point') {
 	                return pointsWithinPolygons(ctx, this.geometries);
 	            }
-	            else if (ctx.geometryType() === 'LineString') {
+	            else if (ctx.geometryDollarType() === 'LineString') {
 	                return linesWithinPolygons(ctx, this.geometries);
 	            }
 	        }
@@ -3601,57 +3761,6 @@
 
 	        data[pos] = item;
 	    }
-	}
-
-	/**
-	 * Classifies an array of rings into polygons with outer rings and holes
-	 * @param rings - the rings to classify
-	 * @param maxRings - the maximum number of rings to include in a polygon, use 0 to include all rings
-	 * @returns an array of polygons with internal rings as holes
-	 */
-	function classifyRings(rings, maxRings) {
-	    const len = rings.length;
-	    if (len <= 1)
-	        return [rings];
-	    const polygons = [];
-	    let polygon;
-	    let ccw;
-	    for (const ring of rings) {
-	        const area = calculateSignedArea(ring);
-	        if (area === 0)
-	            continue;
-	        ring.area = Math.abs(area);
-	        if (ccw === undefined)
-	            ccw = area < 0;
-	        if (ccw === area < 0) {
-	            if (polygon)
-	                polygons.push(polygon);
-	            polygon = [ring];
-	        }
-	        else {
-	            polygon.push(ring);
-	        }
-	    }
-	    if (polygon)
-	        polygons.push(polygon);
-	    return polygons;
-	}
-	/**
-	 * Returns the signed area for the polygon ring.  Positive areas are exterior rings and
-	 * have a clockwise winding.  Negative areas are interior rings and have a counter clockwise
-	 * ordering.
-	 *
-	 * @param ring - Exterior or interior ring
-	 * @returns Signed area
-	 */
-	function calculateSignedArea(ring) {
-	    let sum = 0;
-	    for (let i = 0, len = ring.length, j = len - 1, p1, p2; i < len; j = i++) {
-	        p1 = ring[i];
-	        p2 = ring[j];
-	        sum += (p2.x - p1.x) * (p1.y + p2.y);
-	    }
-	    return sum;
 	}
 
 	// This is taken from https://github.com/mapbox/cheap-ruler/ in order to take only the relevant parts
@@ -4370,7 +4479,7 @@
 	                const parsed = context.parse(args[i], 1 + actualTypes.length);
 	                if (!parsed)
 	                    return null;
-	                actualTypes.push(toString$1(parsed.type));
+	                actualTypes.push(typeToString(parsed.type));
 	            }
 	            context.error(`Expected arguments of type ${signatures}, but found (${actualTypes.join(', ')}) instead.`);
 	        }
@@ -4424,10 +4533,10 @@
 	    'typeof': [
 	        StringType,
 	        [ValueType],
-	        (ctx, [v]) => toString$1(typeOf(v.evaluate(ctx)))
+	        (ctx, [v]) => typeToString(typeOf(v.evaluate(ctx)))
 	    ],
 	    'to-rgba': [
-	        array$1(NumberType, 4),
+	        array(NumberType, 4),
 	        [ColorType],
 	        (ctx, [v]) => {
 	            const [r, g, b, a] = v.evaluate(ctx).rgb;
@@ -4671,7 +4780,7 @@
 	    'filter-type-==': [
 	        BooleanType,
 	        [StringType],
-	        (ctx, [v]) => ctx.geometryType() === v.value
+	        (ctx, [v]) => ctx.geometryDollarType() === v.value
 	    ],
 	    'filter-<': [
 	        BooleanType,
@@ -4757,23 +4866,23 @@
 	    ],
 	    'filter-type-in': [
 	        BooleanType,
-	        [array$1(StringType)],
-	        (ctx, [v]) => v.value.indexOf(ctx.geometryType()) >= 0
+	        [array(StringType)],
+	        (ctx, [v]) => v.value.indexOf(ctx.geometryDollarType()) >= 0
 	    ],
 	    'filter-id-in': [
 	        BooleanType,
-	        [array$1(ValueType)],
+	        [array(ValueType)],
 	        (ctx, [v]) => v.value.indexOf(ctx.id()) >= 0
 	    ],
 	    'filter-in-small': [
 	        BooleanType,
-	        [StringType, array$1(ValueType)],
+	        [StringType, array(ValueType)],
 	        // assumes v is an array literal
 	        (ctx, [k, v]) => v.value.indexOf(ctx.properties()[k.value]) >= 0
 	    ],
 	    'filter-in-large': [
 	        BooleanType,
-	        [StringType, array$1(ValueType)],
+	        [StringType, array(ValueType)],
 	        // assumes v is a array literal with values sorted in ascending order and of a single type
 	        (ctx, [k, v]) => binarySearch(ctx.properties()[k.value], v.value, 0, v.value.length - 1)
 	    ],
@@ -4845,7 +4954,7 @@
 	    'concat': [
 	        StringType,
 	        varargs(ValueType),
-	        (ctx, args) => args.map(arg => toString(arg.evaluate(ctx))).join('')
+	        (ctx, args) => args.map(arg => valueToString(arg.evaluate(ctx))).join('')
 	    ],
 	    'resolved-locale': [
 	        StringType,
@@ -4855,10 +4964,10 @@
 	});
 	function stringifySignature(signature) {
 	    if (Array.isArray(signature)) {
-	        return `(${signature.map(toString$1).join(', ')})`;
+	        return `(${signature.map(typeToString).join(', ')})`;
 	    }
 	    else {
-	        return `(${toString$1(signature.type)}...)`;
+	        return `(${typeToString(signature.type)}...)`;
 	    }
 	}
 	function isExpressionConstant(expression) {
@@ -5032,7 +5141,6 @@
 	        this._evaluator.formattedSection = formattedSection || null;
 	        try {
 	            const val = this.expression.evaluate(this._evaluator);
-	            // eslint-disable-next-line no-self-compare
 	            if (val === null || val === undefined || (typeof val === 'number' && val !== val)) {
 	                return this._defaultValue;
 	            }
@@ -5191,11 +5299,12 @@
 	        boolean: BooleanType,
 	        formatted: FormattedType,
 	        padding: PaddingType,
+	        projectionDefinition: ProjectionDefinitionType,
 	        resolvedImage: ResolvedImageType,
 	        variableAnchorOffsetCollection: VariableAnchorOffsetCollectionType
 	    };
 	    if (spec.type === 'array') {
-	        return array$1(types[spec.value] || ValueType, spec.length);
+	        return array(types[spec.value] || ValueType, spec.length);
 	    }
 	    return types[spec.type];
 	}
@@ -5214,6 +5323,9 @@
 	    }
 	    else if (spec.type === 'variableAnchorOffsetCollection') {
 	        return VariableAnchorOffsetCollection.parse(spec.default) || null;
+	    }
+	    else if (spec.type === 'projectionDefinition') {
+	        return ProjectionDefinition.parse(spec.default) || null;
 	    }
 	    else if (spec.default === undefined) {
 	        return null;
@@ -5327,7 +5439,6 @@
 	    const value = options.value;
 	    const valueSpec = options.valueSpec;
 	    let type = getType(value);
-	    // eslint-disable-next-line no-self-compare
 	    if (type === 'number' && value !== value) {
 	        type = 'NaN';
 	    }
@@ -6323,6 +6434,33 @@
 	    return errors;
 	}
 
+	function validateProjectionDefinition(options) {
+	    const key = options.key;
+	    let value = options.value;
+	    value = value instanceof String ? value.valueOf() : value;
+	    const type = getType(value);
+	    if (type === 'array' && !isProjectionDefinitionValue(value) && !isPropertyValueSpecification(value)) {
+	        return [new ValidationError(key, value, `projection expected, invalid array ${JSON.stringify(value)} found`)];
+	    }
+	    else if (!['array', 'string'].includes(type)) {
+	        return [new ValidationError(key, value, `projection expected, invalid type "${type}" found`)];
+	    }
+	    return [];
+	}
+	function isPropertyValueSpecification(value) {
+	    if (['interpolate', 'step', 'literal'].includes(value[0])) {
+	        return true;
+	    }
+	    return false;
+	}
+	function isProjectionDefinitionValue(value) {
+	    return Array.isArray(value) &&
+	        value.length === 3 &&
+	        typeof value[0] === 'string' &&
+	        typeof value[1] === 'string' &&
+	        typeof value[2] === 'number';
+	}
+
 	const VALIDATORS = {
 	    '*'() {
 	        return [];
@@ -6342,6 +6480,7 @@
 	    'sky': validateSky,
 	    'terrain': validateTerrain,
 	    'projection': validateProjection,
+	    'projectionDefinition': validateProjectionDefinition,
 	    'string': validateString,
 	    'formatted': validateFormatted,
 	    'resolvedImage': validateImage,
@@ -6406,6 +6545,9 @@
 			type: "array",
 			value: "number"
 		},
+		centerAltitude: {
+			type: "number"
+		},
 		zoom: {
 			type: "number"
 		},
@@ -6416,6 +6558,11 @@
 			units: "degrees"
 		},
 		pitch: {
+			type: "number",
+			"default": 0,
+			units: "degrees"
+		},
+		roll: {
 			type: "number",
 			"default": 0,
 			units: "degrees"
@@ -8184,13 +8331,15 @@
 	};
 	var projection = {
 		type: {
-			type: "enum",
+			type: "projectionDefinition",
 			"default": "mercator",
-			values: {
-				mercator: {
-				},
-				globe: {
-				}
+			"property-type": "data-constant",
+			transition: false,
+			expression: {
+				interpolated: true,
+				parameters: [
+					"zoom"
+				]
 			}
 		}
 	};
