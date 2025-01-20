@@ -288,6 +288,9 @@ var $root = {
 		type: "array",
 		value: "number"
 	},
+	centerAltitude: {
+		type: "number"
+	},
 	zoom: {
 		type: "number"
 	},
@@ -301,6 +304,16 @@ var $root = {
 		type: "number",
 		"default": 0,
 		units: "degrees"
+	},
+	roll: {
+		type: "number",
+		"default": 0,
+		units: "degrees"
+	},
+	state: {
+		type: "state",
+		"default": {
+		}
 	},
 	light: {
 		type: "light"
@@ -699,6 +712,8 @@ var layer = {
 			},
 			hillshade: {
 			},
+			"color-relief": {
+			},
 			background: {
 			}
 		},
@@ -742,6 +757,7 @@ var layout = [
 	"layout_symbol",
 	"layout_raster",
 	"layout_hillshade",
+	"layout_color-relief",
 	"layout_background"
 ];
 var layout_background = {
@@ -2066,13 +2082,15 @@ var terrain = {
 };
 var projection = {
 	type: {
-		type: "enum",
+		type: "projectionDefinition",
 		"default": "mercator",
-		values: {
-			mercator: {
-			},
-			globe: {
-			}
+		"property-type": "data-constant",
+		transition: false,
+		expression: {
+			interpolated: true,
+			parameters: [
+				"zoom"
+			]
 		}
 	}
 };
@@ -2085,6 +2103,7 @@ var paint = [
 	"paint_symbol",
 	"paint_raster",
 	"paint_hillshade",
+	"paint_color-relief",
 	"paint_background"
 ];
 var paint_fill = {
@@ -3060,10 +3079,24 @@ var paint_raster = {
 };
 var paint_hillshade = {
 	"hillshade-illumination-direction": {
-		type: "number",
+		type: "numberArray",
 		"default": 335,
 		minimum: 0,
 		maximum: 359,
+		transition: false,
+		expression: {
+			interpolated: true,
+			parameters: [
+				"zoom"
+			]
+		},
+		"property-type": "data-constant"
+	},
+	"hillshade-illumination-altitude": {
+		type: "numberArray",
+		"default": 45,
+		minimum: 0,
+		maximum: 90,
 		transition: false,
 		expression: {
 			interpolated: true,
@@ -3105,7 +3138,7 @@ var paint_hillshade = {
 		"property-type": "data-constant"
 	},
 	"hillshade-shadow-color": {
-		type: "color",
+		type: "colorArray",
 		"default": "#000000",
 		transition: true,
 		expression: {
@@ -3117,7 +3150,7 @@ var paint_hillshade = {
 		"property-type": "data-constant"
 	},
 	"hillshade-highlight-color": {
-		type: "color",
+		type: "colorArray",
 		"default": "#FFFFFF",
 		transition: true,
 		expression: {
@@ -3134,6 +3167,29 @@ var paint_hillshade = {
 		transition: true,
 		expression: {
 			interpolated: true,
+			parameters: [
+				"zoom"
+			]
+		},
+		"property-type": "data-constant"
+	},
+	"hillshade-method": {
+		type: "enum",
+		values: {
+			standard: {
+			},
+			basic: {
+			},
+			combined: {
+			},
+			igor: {
+			},
+			multidirectional: {
+			}
+		},
+		"default": "standard",
+		expression: {
+			interpolated: false,
 			parameters: [
 				"zoom"
 			]
@@ -3204,7 +3260,7 @@ var promoteId = {
 		type: "string"
 	}
 };
-var spec = {
+var latest = {
 	$version: $version,
 	$root: $root,
 	sources: sources,
@@ -3238,6 +3294,19 @@ var spec = {
 	layout_symbol: layout_symbol,
 	layout_raster: layout_raster,
 	layout_hillshade: layout_hillshade,
+	"layout_color-relief": {
+	visibility: {
+		type: "enum",
+		values: {
+			visible: {
+			},
+			none: {
+			}
+		},
+		"default": "visible",
+		"property-type": "constant"
+	}
+},
 	filter: filter,
 	filter_operator: filter_operator,
 	geometry_type: geometry_type,
@@ -3435,6 +3504,33 @@ var spec = {
 	paint_symbol: paint_symbol,
 	paint_raster: paint_raster,
 	paint_hillshade: paint_hillshade,
+	"paint_color-relief": {
+	"color-relief-opacity": {
+		type: "number",
+		"default": 1,
+		minimum: 0,
+		maximum: 1,
+		transition: true,
+		expression: {
+			interpolated: true,
+			parameters: [
+				"zoom"
+			]
+		},
+		"property-type": "data-constant"
+	},
+	"color-relief-color": {
+		type: "color",
+		transition: false,
+		expression: {
+			interpolated: true,
+			parameters: [
+				"elevation"
+			]
+		},
+		"property-type": "color-ramp"
+	}
+},
 	paint_background: paint_background,
 	transition: transition,
 	"property-type": {
@@ -3595,9 +3691,9 @@ function sortKeysBy(obj, reference) {
  * fs.writeFileSync('./dest.min.json', format(style, 0));
  */
 function format(style, space = 2) {
-    style = sortKeysBy(style, spec.$root);
+    style = sortKeysBy(style, latest.$root);
     if (style.layers) {
-        style.layers = style.layers.map((layer) => sortKeysBy(layer, spec.layer));
+        style.layers = style.layers.map((layer) => sortKeysBy(layer, latest.layer));
     }
     return stringify(style, { indent: space });
 }

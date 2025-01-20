@@ -535,24 +535,27 @@ const NumberType = { kind: 'number' };
 const StringType = { kind: 'string' };
 const BooleanType = { kind: 'boolean' };
 const ColorType = { kind: 'color' };
+const ProjectionDefinitionType = { kind: 'projectionDefinition' };
 const ObjectType = { kind: 'object' };
 const ValueType = { kind: 'value' };
 const ErrorType = { kind: 'error' };
 const CollatorType = { kind: 'collator' };
 const FormattedType = { kind: 'formatted' };
 const PaddingType = { kind: 'padding' };
+const ColorArrayType = { kind: 'colorArray' };
+const NumberArrayType = { kind: 'numberArray' };
 const ResolvedImageType = { kind: 'resolvedImage' };
 const VariableAnchorOffsetCollectionType = { kind: 'variableAnchorOffsetCollection' };
-function array$1(itemType, N) {
+function array(itemType, N) {
     return {
         kind: 'array',
         itemType,
         N
     };
 }
-function toString$1(type) {
+function typeToString(type) {
     if (type.kind === 'array') {
-        const itemType = toString$1(type.itemType);
+        const itemType = typeToString(type.itemType);
         return typeof type.N === 'number' ?
             `array<${itemType}, ${type.N}>` :
             type.itemType.kind === 'value' ? 'array' : `array<${itemType}>`;
@@ -567,10 +570,13 @@ const valueMemberTypes = [
     StringType,
     BooleanType,
     ColorType,
+    ProjectionDefinitionType,
     FormattedType,
     ObjectType,
-    array$1(ValueType),
+    array(ValueType),
     PaddingType,
+    NumberArrayType,
+    ColorArrayType,
     ResolvedImageType,
     VariableAnchorOffsetCollectionType
 ];
@@ -601,7 +607,7 @@ function checkSubtype(expected, t) {
             }
         }
     }
-    return `Expected ${toString$1(expected)} but found ${toString$1(t)} instead.`;
+    return `Expected ${typeToString(expected)} but found ${typeToString(t)} instead.`;
 }
 function isValidType(provided, allowedTypes) {
     return allowedTypes.some(t => t.kind === provided.kind);
@@ -721,6 +727,15 @@ function hslToRgb([h, s, l, alpha]) {
     return [f(0), f(8), f(4), alpha];
 }
 
+// polyfill for Object.hasOwn
+const hasOwnProperty = Object.hasOwn ||
+    function hasOwnProperty(object, key) {
+        return Object.prototype.hasOwnProperty.call(object, key);
+    };
+function getOwn(object, key) {
+    return hasOwnProperty(object, key) ? object[key] : undefined;
+}
+
 /**
  * CSS color parser compliant with CSS Color 4 Specification.
  * Supports: named colors, `transparent` keyword, all rgb hex notations,
@@ -756,7 +771,7 @@ function parseCssColor(input) {
         return [0, 0, 0, 0];
     }
     // 'white', 'black', 'blue'
-    const namedColorsMatch = namedColors[input];
+    const namedColorsMatch = getOwn(namedColors, input);
     if (namedColorsMatch) {
         const [r, g, b] = namedColorsMatch;
         return [r / 255, g / 255, b / 255, 1];
@@ -1029,6 +1044,15 @@ const namedColors = {
     yellowgreen: [154, 205, 50],
 };
 
+function interpolateNumber(from, to, t) {
+    return from + t * (to - from);
+}
+function interpolateArray(from, to, t) {
+    return from.map((d, i) => {
+        return interpolateNumber(d, to[i], t);
+    });
+}
+
 /**
  * Color representation used by WebGL.
  * Defined in sRGB color space and pre-blended with alpha.
@@ -1150,6 +1174,54 @@ class Color {
         const [r, g, b, a] = this.rgb;
         return `rgba(${[r, g, b].map(n => Math.round(n * 255)).join(',')},${a})`;
     }
+    static interpolate(from, to, t, spaceKey = 'rgb') {
+        switch (spaceKey) {
+            case 'rgb': {
+                const [r, g, b, alpha] = interpolateArray(from.rgb, to.rgb, t);
+                return new Color(r, g, b, alpha, false);
+            }
+            case 'hcl': {
+                const [hue0, chroma0, light0, alphaF] = from.hcl;
+                const [hue1, chroma1, light1, alphaT] = to.hcl;
+                // https://github.com/gka/chroma.js/blob/cd1b3c0926c7a85cbdc3b1453b3a94006de91a92/src/interpolator/_hsx.js
+                let hue, chroma;
+                if (!isNaN(hue0) && !isNaN(hue1)) {
+                    let dh = hue1 - hue0;
+                    if (hue1 > hue0 && dh > 180) {
+                        dh -= 360;
+                    }
+                    else if (hue1 < hue0 && hue0 - hue1 > 180) {
+                        dh += 360;
+                    }
+                    hue = hue0 + t * dh;
+                }
+                else if (!isNaN(hue0)) {
+                    hue = hue0;
+                    if (light1 === 1 || light1 === 0)
+                        chroma = chroma0;
+                }
+                else if (!isNaN(hue1)) {
+                    hue = hue1;
+                    if (light0 === 1 || light0 === 0)
+                        chroma = chroma1;
+                }
+                else {
+                    hue = NaN;
+                }
+                const [r, g, b, alpha] = hclToRgb([
+                    hue,
+                    chroma !== null && chroma !== void 0 ? chroma : interpolateNumber(chroma0, chroma1, t),
+                    interpolateNumber(light0, light1, t),
+                    interpolateNumber(alphaF, alphaT, t),
+                ]);
+                return new Color(r, g, b, alpha, false);
+            }
+            case 'lab': {
+                const [r, g, b, alpha] = labToRgb(interpolateArray(from.lab, to.lab, t));
+                return new Color(r, g, b, alpha, false);
+            }
+        }
+    }
 }
 Color.black = new Color(0, 0, 0, 1);
 Color.white = new Color(1, 1, 1, 1);
@@ -1178,13 +1250,15 @@ class Collator {
     }
 }
 
+const VERTICAL_ALIGN_OPTIONS = ['bottom', 'center', 'top'];
 class FormattedSection {
-    constructor(text, image, scale, fontStack, textColor) {
+    constructor(text, image, scale, fontStack, textColor, verticalAlign) {
         this.text = text;
         this.image = image;
         this.scale = scale;
         this.fontStack = fontStack;
         this.textColor = textColor;
+        this.verticalAlign = verticalAlign;
     }
 }
 class Formatted {
@@ -1192,7 +1266,7 @@ class Formatted {
         this.sections = sections;
     }
     static fromString(unformatted) {
-        return new Formatted([new FormattedSection(unformatted, null, null, null, null)]);
+        return new Formatted([new FormattedSection(unformatted, null, null, null, null, null)]);
     }
     isEmpty() {
         if (this.sections.length === 0)
@@ -1266,6 +1340,116 @@ class Padding {
     toString() {
         return JSON.stringify(this.values);
     }
+    static interpolate(from, to, t) {
+        return new Padding(interpolateArray(from.values, to.values, t));
+    }
+}
+
+/**
+ * An array of numbers. Create instances from
+ * bare arrays or numeric values using the static method `NumberArray.parse`.
+ * @private
+ */
+class NumberArray {
+    constructor(values) {
+        this.values = values.slice();
+    }
+    /**
+     * Numeric NumberArray values
+     * @param input A NumberArray value
+     * @returns A `NumberArray` instance, or `undefined` if the input is not a valid NumberArray value.
+     */
+    static parse(input) {
+        if (input instanceof NumberArray) {
+            return input;
+        }
+        // Backwards compatibility (e.g. hillshade-illumination-direction): bare number is treated the same as array with single value.
+        if (typeof input === 'number') {
+            return new NumberArray([input]);
+        }
+        if (!Array.isArray(input)) {
+            return undefined;
+        }
+        for (const val of input) {
+            if (typeof val !== 'number') {
+                return undefined;
+            }
+        }
+        return new NumberArray(input);
+    }
+    toString() {
+        return JSON.stringify(this.values);
+    }
+    static interpolate(from, to, t) {
+        return new NumberArray(interpolateArray(from.values, to.values, t));
+    }
+}
+
+/**
+ * An array of colors. Create instances from
+ * bare arrays or strings using the static method `ColorArray.parse`.
+ * @private
+ */
+class ColorArray {
+    constructor(values) {
+        this.values = values.slice();
+    }
+    /**
+     * ColorArray values
+     * @param input A ColorArray value
+     * @returns A `ColorArray` instance, or `undefined` if the input is not a valid ColorArray value.
+     */
+    static parse(input) {
+        if (input instanceof ColorArray) {
+            return input;
+        }
+        // Backwards compatibility (e.g. hillshade-shadow-color): bare Color is treated the same as array with single value.
+        if (typeof input === 'string') {
+            const parsed_val = Color.parse(input);
+            if (!parsed_val) {
+                return undefined;
+            }
+            return new ColorArray([parsed_val]);
+        }
+        if (!Array.isArray(input)) {
+            return undefined;
+        }
+        const colors = [];
+        for (const val of input) {
+            if (typeof val !== 'string') {
+                return undefined;
+            }
+            const parsed_val = Color.parse(val);
+            if (!parsed_val) {
+                return undefined;
+            }
+            colors.push(parsed_val);
+        }
+        return new ColorArray(colors);
+    }
+    toString() {
+        return JSON.stringify(this.values);
+    }
+    static interpolate(from, to, t, spaceKey = 'rgb') {
+        const colors = [];
+        if (from.values.length != to.values.length) {
+            throw new Error(`colorArray: Arrays have mismatched length (${from.values.length} vs. ${to.values.length}), cannot interpolate.`);
+        }
+        for (let i = 0; i < from.values.length; i++) {
+            colors.push(Color.interpolate(from.values[i], to.values[i], t, spaceKey));
+        }
+        return new ColorArray(colors);
+    }
+}
+
+class RuntimeError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'RuntimeError';
+    }
+    toJSON() {
+        return this.message;
+    }
 }
 
 /** Set of valid anchor positions, as a set for validation */
@@ -1304,6 +1488,26 @@ class VariableAnchorOffsetCollection {
     toString() {
         return JSON.stringify(this.values);
     }
+    static interpolate(from, to, t) {
+        const fromValues = from.values;
+        const toValues = to.values;
+        if (fromValues.length !== toValues.length) {
+            throw new RuntimeError(`Cannot interpolate values of different length. from: ${from.toString()}, to: ${to.toString()}`);
+        }
+        const output = [];
+        for (let i = 0; i < fromValues.length; i += 2) {
+            // Anchor entries must match
+            if (fromValues[i] !== toValues[i]) {
+                throw new RuntimeError(`Cannot interpolate values containing mismatched anchors. from[${i}]: ${fromValues[i]}, to[${i}]: ${toValues[i]}`);
+            }
+            output.push(fromValues[i]);
+            // Interpolate the offset values for each anchor
+            const [fx, fy] = fromValues[i + 1];
+            const [tx, ty] = toValues[i + 1];
+            output.push([interpolateNumber(fx, tx, t), interpolateNumber(fy, ty, t)]);
+        }
+        return new VariableAnchorOffsetCollection(output);
+    }
 }
 
 class ResolvedImage {
@@ -1318,6 +1522,32 @@ class ResolvedImage {
         if (!name)
             return null; // treat empty values as no image
         return new ResolvedImage({ name, available: false });
+    }
+}
+
+class ProjectionDefinition {
+    constructor(from, to, transition) {
+        this.from = from;
+        this.to = to;
+        this.transition = transition;
+    }
+    static interpolate(from, to, t) {
+        return new ProjectionDefinition(from, to, t);
+    }
+    static parse(input) {
+        if (input instanceof ProjectionDefinition) {
+            return input;
+        }
+        if (Array.isArray(input) && input.length === 3 && typeof input[0] === 'string' && typeof input[1] === 'string' && typeof input[2] === 'number') {
+            return new ProjectionDefinition(input[0], input[1], input[2]);
+        }
+        if (typeof input === 'object' && typeof input.from === 'string' && typeof input.to === 'string' && typeof input.transition === 'number') {
+            return new ProjectionDefinition(input.from, input.to, input.transition);
+        }
+        if (typeof input === 'string') {
+            return new ProjectionDefinition(input, input, 1);
+        }
+        return undefined;
     }
 }
 
@@ -1338,10 +1568,13 @@ function isValue(mixed) {
         typeof mixed === 'string' ||
         typeof mixed === 'boolean' ||
         typeof mixed === 'number' ||
+        mixed instanceof ProjectionDefinition ||
         mixed instanceof Color ||
         mixed instanceof Collator ||
         mixed instanceof Formatted ||
         mixed instanceof Padding ||
+        mixed instanceof NumberArray ||
+        mixed instanceof ColorArray ||
         mixed instanceof VariableAnchorOffsetCollection ||
         mixed instanceof ResolvedImage) {
         return true;
@@ -1382,6 +1615,9 @@ function typeOf(value) {
     else if (value instanceof Color) {
         return ColorType;
     }
+    else if (value instanceof ProjectionDefinition) {
+        return ProjectionDefinitionType;
+    }
     else if (value instanceof Collator) {
         return CollatorType;
     }
@@ -1390,6 +1626,12 @@ function typeOf(value) {
     }
     else if (value instanceof Padding) {
         return PaddingType;
+    }
+    else if (value instanceof NumberArray) {
+        return NumberArrayType;
+    }
+    else if (value instanceof ColorArray) {
+        return ColorArrayType;
     }
     else if (value instanceof VariableAnchorOffsetCollection) {
         return VariableAnchorOffsetCollectionType;
@@ -1413,13 +1655,13 @@ function typeOf(value) {
                 break;
             }
         }
-        return array$1(itemType || ValueType, length);
+        return array(itemType || ValueType, length);
     }
     else {
         return ObjectType;
     }
 }
-function toString(value) {
+function valueToString(value) {
     const type = typeof value;
     if (value === null) {
         return '';
@@ -1427,7 +1669,7 @@ function toString(value) {
     else if (type === 'string' || type === 'number' || type === 'boolean') {
         return String(value);
     }
-    else if (value instanceof Color || value instanceof Formatted || value instanceof Padding || value instanceof VariableAnchorOffsetCollection || value instanceof ResolvedImage) {
+    else if (value instanceof Color || value instanceof ProjectionDefinition || value instanceof Formatted || value instanceof Padding || value instanceof NumberArray || value instanceof ColorArray || value instanceof VariableAnchorOffsetCollection || value instanceof ResolvedImage) {
         return value.toString();
     }
     else {
@@ -1464,16 +1706,6 @@ class Literal {
     eachChild() { }
     outputDefined() {
         return true;
-    }
-}
-
-class RuntimeError {
-    constructor(message) {
-        this.name = 'ExpressionEvaluationError';
-        this.message = message;
-    }
-    toJSON() {
-        return this.message;
     }
 }
 
@@ -1517,7 +1749,7 @@ class Assertion {
                 N = args[2];
                 i++;
             }
-            type = array$1(itemType, N);
+            type = array(itemType, N);
         }
         else {
             if (!types$1[name])
@@ -1541,7 +1773,7 @@ class Assertion {
                 return value;
             }
             else if (i === this.args.length - 1) {
-                throw new RuntimeError(`Expected value to be of type ${toString$1(this.type)}, but found ${toString$1(typeOf(value))} instead.`);
+                throw new RuntimeError(`Expected value to be of type ${typeToString(this.type)}, but found ${typeToString(typeOf(value))} instead.`);
             }
         }
         throw new Error();
@@ -1633,6 +1865,28 @@ class Coercion {
                 }
                 throw new RuntimeError(`Could not parse padding from value '${typeof input === 'string' ? input : JSON.stringify(input)}'`);
             }
+            case 'numberArray': {
+                let input;
+                for (const arg of this.args) {
+                    input = arg.evaluate(ctx);
+                    const val = NumberArray.parse(input);
+                    if (val) {
+                        return val;
+                    }
+                }
+                throw new RuntimeError(`Could not parse numberArray from value '${typeof input === 'string' ? input : JSON.stringify(input)}'`);
+            }
+            case 'colorArray': {
+                let input;
+                for (const arg of this.args) {
+                    input = arg.evaluate(ctx);
+                    const val = ColorArray.parse(input);
+                    if (val) {
+                        return val;
+                    }
+                }
+                throw new RuntimeError(`Could not parse colorArray from value '${typeof input === 'string' ? input : JSON.stringify(input)}'`);
+            }
             case 'variableAnchorOffsetCollection': {
                 let input;
                 for (const arg of this.args) {
@@ -1660,11 +1914,13 @@ class Coercion {
             case 'formatted':
                 // There is no explicit 'to-formatted' but this coercion can be implicitly
                 // created by properties that expect the 'formatted' type.
-                return Formatted.fromString(toString(this.args[0].evaluate(ctx)));
+                return Formatted.fromString(valueToString(this.args[0].evaluate(ctx)));
             case 'resolvedImage':
-                return ResolvedImage.fromString(toString(this.args[0].evaluate(ctx)));
+                return ResolvedImage.fromString(valueToString(this.args[0].evaluate(ctx)));
+            case 'projectionDefinition':
+                return this.args[0].evaluate(ctx);
             default:
-                return toString(this.args[0].evaluate(ctx));
+                return valueToString(this.args[0].evaluate(ctx));
         }
     }
     eachChild(fn) {
@@ -1682,7 +1938,7 @@ class EvaluationContext {
         this.feature = null;
         this.featureState = null;
         this.formattedSection = null;
-        this._parseColorCache = {};
+        this._parseColorCache = new Map();
         this.availableImages = null;
         this.canonical = null;
     }
@@ -1702,9 +1958,10 @@ class EvaluationContext {
         return this.feature && this.feature.properties || {};
     }
     parseColor(input) {
-        let cached = this._parseColorCache[input];
+        let cached = this._parseColorCache.get(input);
         if (!cached) {
-            cached = this._parseColorCache[input] = Color.parse(input);
+            cached = Color.parse(input);
+            this._parseColorCache.set(input, cached);
         }
         return cached;
     }
@@ -1780,13 +2037,11 @@ class ParsingContext {
                     if ((expected.kind === 'string' || expected.kind === 'number' || expected.kind === 'boolean' || expected.kind === 'object' || expected.kind === 'array') && actual.kind === 'value') {
                         parsed = annotate(parsed, expected, options.typeAnnotation || 'assert');
                     }
-                    else if ((expected.kind === 'color' || expected.kind === 'formatted' || expected.kind === 'resolvedImage') && (actual.kind === 'value' || actual.kind === 'string')) {
-                        parsed = annotate(parsed, expected, options.typeAnnotation || 'coerce');
-                    }
-                    else if (expected.kind === 'padding' && (actual.kind === 'value' || actual.kind === 'number' || actual.kind === 'array')) {
-                        parsed = annotate(parsed, expected, options.typeAnnotation || 'coerce');
-                    }
-                    else if (expected.kind === 'variableAnchorOffsetCollection' && (actual.kind === 'value' || actual.kind === 'array')) {
+                    else if (('projectionDefinition' === expected.kind && ['string', 'array'].includes(actual.kind)) ||
+                        ((['color', 'formatted', 'resolvedImage'].includes(expected.kind)) && ['value', 'string'].includes(actual.kind)) ||
+                        ((['padding', 'numberArray'].includes(expected.kind)) && ['value', 'number', 'array'].includes(actual.kind)) ||
+                        ('colorArray' === expected.kind && ['value', 'string', 'array'].includes(actual.kind)) ||
+                        ('variableAnchorOffsetCollection' === expected.kind && ['value', 'array'].includes(actual.kind))) {
                         parsed = annotate(parsed, expected, options.typeAnnotation || 'coerce');
                     }
                     else if (this.checkSubtype(expected, actual)) {
@@ -1936,7 +2191,7 @@ class At {
         if (args.length !== 3)
             return context.error(`Expected 2 arguments, but found ${args.length - 1} instead.`);
         const index = context.parse(args[1], 1, NumberType);
-        const input = context.parse(args[2], 2, array$1(context.expectedType || ValueType));
+        const input = context.parse(args[2], 2, array(context.expectedType || ValueType));
         if (!index || !input)
             return null;
         const t = input.type;
@@ -1980,7 +2235,7 @@ class In {
         if (!needle || !haystack)
             return null;
         if (!isValidType(needle.type, [BooleanType, StringType, NumberType, NullType, ValueType])) {
-            return context.error(`Expected first argument to be of type boolean, string, number or null, but found ${toString$1(needle.type)} instead`);
+            return context.error(`Expected first argument to be of type boolean, string, number or null, but found ${typeToString(needle.type)} instead`);
         }
         return new In(needle, haystack);
     }
@@ -1990,10 +2245,10 @@ class In {
         if (!haystack)
             return false;
         if (!isValidNativeType(needle, ['boolean', 'string', 'number', 'null'])) {
-            throw new RuntimeError(`Expected first argument to be of type boolean, string, number or null, but found ${toString$1(typeOf(needle))} instead.`);
+            throw new RuntimeError(`Expected first argument to be of type boolean, string, number or null, but found ${typeToString(typeOf(needle))} instead.`);
         }
         if (!isValidNativeType(haystack, ['string', 'array'])) {
-            throw new RuntimeError(`Expected second argument to be of type array or string, but found ${toString$1(typeOf(haystack))} instead.`);
+            throw new RuntimeError(`Expected second argument to be of type array or string, but found ${typeToString(typeOf(haystack))} instead.`);
         }
         return haystack.indexOf(needle) >= 0;
     }
@@ -2022,7 +2277,7 @@ class IndexOf {
         if (!needle || !haystack)
             return null;
         if (!isValidType(needle.type, [BooleanType, StringType, NumberType, NullType, ValueType])) {
-            return context.error(`Expected first argument to be of type boolean, string, number or null, but found ${toString$1(needle.type)} instead`);
+            return context.error(`Expected first argument to be of type boolean, string, number or null, but found ${typeToString(needle.type)} instead`);
         }
         if (args.length === 4) {
             const fromIndex = context.parse(args[3], 3, NumberType);
@@ -2038,7 +2293,7 @@ class IndexOf {
         const needle = this.needle.evaluate(ctx);
         const haystack = this.haystack.evaluate(ctx);
         if (!isValidNativeType(needle, ['boolean', 'string', 'number', 'null'])) {
-            throw new RuntimeError(`Expected first argument to be of type boolean, string, number or null, but found ${toString$1(typeOf(needle))} instead.`);
+            throw new RuntimeError(`Expected first argument to be of type boolean, string, number or null, but found ${typeToString(typeOf(needle))} instead.`);
         }
         let fromIndex;
         if (this.fromIndex) {
@@ -2058,7 +2313,7 @@ class IndexOf {
             return haystack.indexOf(needle, fromIndex);
         }
         else {
-            throw new RuntimeError(`Expected second argument to be of type array or string, but found ${toString$1(typeOf(haystack))} instead.`);
+            throw new RuntimeError(`Expected second argument to be of type array or string, but found ${typeToString(typeOf(haystack))} instead.`);
         }
     }
     eachChild(fn) {
@@ -2225,8 +2480,8 @@ class Slice {
         const beginIndex = context.parse(args[2], 2, NumberType);
         if (!input || !beginIndex)
             return null;
-        if (!isValidType(input.type, [array$1(ValueType), StringType, ValueType])) {
-            return context.error(`Expected first argument to be of type array or string, but found ${toString$1(input.type)} instead`);
+        if (!isValidType(input.type, [array(ValueType), StringType, ValueType])) {
+            return context.error(`Expected first argument to be of type array or string, but found ${typeToString(input.type)} instead`);
         }
         if (args.length === 4) {
             const endIndex = context.parse(args[3], 3, NumberType);
@@ -2253,7 +2508,7 @@ class Slice {
             return input.slice(beginIndex, endIndex);
         }
         else {
-            throw new RuntimeError(`Expected first argument to be of type array or string, but found ${toString$1(typeOf(input))} instead.`);
+            throw new RuntimeError(`Expected first argument to be of type array or string, but found ${typeToString(typeOf(input))} instead.`);
         }
     }
     eachChild(fn) {
@@ -2450,93 +2705,6 @@ UnitBezier.prototype = {
 
 var UnitBezier$1 = /*@__PURE__*/getDefaultExportFromCjs(unitbezier);
 
-function number(from, to, t) {
-    return from + t * (to - from);
-}
-function color(from, to, t, spaceKey = 'rgb') {
-    switch (spaceKey) {
-        case 'rgb': {
-            const [r, g, b, alpha] = array(from.rgb, to.rgb, t);
-            return new Color(r, g, b, alpha, false);
-        }
-        case 'hcl': {
-            const [hue0, chroma0, light0, alphaF] = from.hcl;
-            const [hue1, chroma1, light1, alphaT] = to.hcl;
-            // https://github.com/gka/chroma.js/blob/cd1b3c0926c7a85cbdc3b1453b3a94006de91a92/src/interpolator/_hsx.js
-            let hue, chroma;
-            if (!isNaN(hue0) && !isNaN(hue1)) {
-                let dh = hue1 - hue0;
-                if (hue1 > hue0 && dh > 180) {
-                    dh -= 360;
-                }
-                else if (hue1 < hue0 && hue0 - hue1 > 180) {
-                    dh += 360;
-                }
-                hue = hue0 + t * dh;
-            }
-            else if (!isNaN(hue0)) {
-                hue = hue0;
-                if (light1 === 1 || light1 === 0)
-                    chroma = chroma0;
-            }
-            else if (!isNaN(hue1)) {
-                hue = hue1;
-                if (light0 === 1 || light0 === 0)
-                    chroma = chroma1;
-            }
-            else {
-                hue = NaN;
-            }
-            const [r, g, b, alpha] = hclToRgb([
-                hue,
-                chroma !== null && chroma !== void 0 ? chroma : number(chroma0, chroma1, t),
-                number(light0, light1, t),
-                number(alphaF, alphaT, t),
-            ]);
-            return new Color(r, g, b, alpha, false);
-        }
-        case 'lab': {
-            const [r, g, b, alpha] = labToRgb(array(from.lab, to.lab, t));
-            return new Color(r, g, b, alpha, false);
-        }
-    }
-}
-function array(from, to, t) {
-    return from.map((d, i) => {
-        return number(d, to[i], t);
-    });
-}
-function padding(from, to, t) {
-    return new Padding(array(from.values, to.values, t));
-}
-function variableAnchorOffsetCollection(from, to, t) {
-    const fromValues = from.values;
-    const toValues = to.values;
-    if (fromValues.length !== toValues.length) {
-        throw new RuntimeError(`Cannot interpolate values of different length. from: ${from.toString()}, to: ${to.toString()}`);
-    }
-    const output = [];
-    for (let i = 0; i < fromValues.length; i += 2) {
-        // Anchor entries must match
-        if (fromValues[i] !== toValues[i]) {
-            throw new RuntimeError(`Cannot interpolate values containing mismatched anchors. from[${i}]: ${fromValues[i]}, to[${i}]: ${toValues[i]}`);
-        }
-        output.push(fromValues[i]);
-        // Interpolate the offset values for each anchor
-        const [fx, fy] = fromValues[i + 1];
-        const [tx, ty] = toValues[i + 1];
-        output.push([number(fx, tx, t), number(fy, ty, t)]);
-    }
-    return new VariableAnchorOffsetCollection(output);
-}
-const interpolate = {
-    number,
-    color,
-    array,
-    padding,
-    variableAnchorOffsetCollection
-};
-
 class Interpolate {
     constructor(type, operator, interpolation, input, stops) {
         this.type = type;
@@ -2607,7 +2775,7 @@ class Interpolate {
             return null;
         const stops = [];
         let outputType = null;
-        if (operator === 'interpolate-hcl' || operator === 'interpolate-lab') {
+        if ((operator === 'interpolate-hcl' || operator === 'interpolate-lab') && context.expectedType != ColorArrayType) {
             outputType = ColorType;
         }
         else if (context.expectedType && context.expectedType.kind !== 'value') {
@@ -2631,11 +2799,14 @@ class Interpolate {
             stops.push([label, parsed]);
         }
         if (!verifyType(outputType, NumberType) &&
+            !verifyType(outputType, ProjectionDefinitionType) &&
             !verifyType(outputType, ColorType) &&
             !verifyType(outputType, PaddingType) &&
+            !verifyType(outputType, NumberArrayType) &&
+            !verifyType(outputType, ColorArrayType) &&
             !verifyType(outputType, VariableAnchorOffsetCollectionType) &&
-            !verifyType(outputType, array$1(NumberType))) {
-            return context.error(`Type ${toString$1(outputType)} is not interpolatable.`);
+            !verifyType(outputType, array(NumberType))) {
+            return context.error(`Type ${typeToString(outputType)} is not interpolatable.`);
         }
         return new Interpolate(outputType, operator, interpolation, input, stops);
     }
@@ -2661,11 +2832,38 @@ class Interpolate {
         const outputUpper = outputs[index + 1].evaluate(ctx);
         switch (this.operator) {
             case 'interpolate':
-                return interpolate[this.type.kind](outputLower, outputUpper, t);
+                switch (this.type.kind) {
+                    case 'number':
+                        return interpolateNumber(outputLower, outputUpper, t);
+                    case 'color':
+                        return Color.interpolate(outputLower, outputUpper, t);
+                    case 'padding':
+                        return Padding.interpolate(outputLower, outputUpper, t);
+                    case 'colorArray':
+                        return ColorArray.interpolate(outputLower, outputUpper, t);
+                    case 'numberArray':
+                        return NumberArray.interpolate(outputLower, outputUpper, t);
+                    case 'variableAnchorOffsetCollection':
+                        return VariableAnchorOffsetCollection.interpolate(outputLower, outputUpper, t);
+                    case 'array':
+                        return interpolateArray(outputLower, outputUpper, t);
+                    case 'projectionDefinition':
+                        return ProjectionDefinition.interpolate(outputLower, outputUpper, t);
+                }
             case 'interpolate-hcl':
-                return interpolate.color(outputLower, outputUpper, t, 'hcl');
+                switch (this.type.kind) {
+                    case 'color':
+                        return Color.interpolate(outputLower, outputUpper, t, 'hcl');
+                    case 'colorArray':
+                        return ColorArray.interpolate(outputLower, outputUpper, t, 'hcl');
+                }
             case 'interpolate-lab':
-                return interpolate.color(outputLower, outputUpper, t, 'lab');
+                switch (this.type.kind) {
+                    case 'color':
+                        return Color.interpolate(outputLower, outputUpper, t, 'lab');
+                    case 'colorArray':
+                        return ColorArray.interpolate(outputLower, outputUpper, t, 'lab');
+                }
         }
     }
     eachChild(fn) {
@@ -2726,6 +2924,15 @@ function exponentialInterpolation(input, base, lowerValue, upperValue) {
         return (Math.pow(base, progress) - 1) / (Math.pow(base, difference) - 1);
     }
 }
+({
+    color: Color.interpolate,
+    number: interpolateNumber,
+    padding: Padding.interpolate,
+    numberArray: NumberArray.interpolate,
+    colorArray: ColorArray.interpolate,
+    variableAnchorOffsetCollection: VariableAnchorOffsetCollection.interpolate,
+    array: interpolateArray
+});
 
 class Coalesce {
     constructor(type, args) {
@@ -2856,18 +3063,18 @@ function makeComparison(op, compareBasic, compareWithCollator) {
             if (!lhs)
                 return null;
             if (!isComparableType(op, lhs.type)) {
-                return context.concat(1).error(`"${op}" comparisons are not supported for type '${toString$1(lhs.type)}'.`);
+                return context.concat(1).error(`"${op}" comparisons are not supported for type '${typeToString(lhs.type)}'.`);
             }
             let rhs = context.parse(args[2], 2, ValueType);
             if (!rhs)
                 return null;
             if (!isComparableType(op, rhs.type)) {
-                return context.concat(2).error(`"${op}" comparisons are not supported for type '${toString$1(rhs.type)}'.`);
+                return context.concat(2).error(`"${op}" comparisons are not supported for type '${typeToString(rhs.type)}'.`);
             }
             if (lhs.type.kind !== rhs.type.kind &&
                 lhs.type.kind !== 'value' &&
                 rhs.type.kind !== 'value') {
-                return context.error(`Cannot compare types '${toString$1(lhs.type)}' and '${toString$1(rhs.type)}'.`);
+                return context.error(`Cannot compare types '${typeToString(lhs.type)}' and '${typeToString(rhs.type)}'.`);
             }
             if (isOrderComparison) {
                 // typing rules specific to less/greater than operators
@@ -3080,7 +3287,7 @@ class FormatExpression {
                 }
                 let font = null;
                 if (arg['text-font']) {
-                    font = context.parse(arg['text-font'], 1, array$1(StringType));
+                    font = context.parse(arg['text-font'], 1, array(StringType));
                     if (!font)
                         return null;
                 }
@@ -3090,10 +3297,20 @@ class FormatExpression {
                     if (!textColor)
                         return null;
                 }
+                let verticalAlign = null;
+                if (arg['vertical-align']) {
+                    if (typeof arg['vertical-align'] === 'string' && !VERTICAL_ALIGN_OPTIONS.includes(arg['vertical-align'])) {
+                        return context.error(`'vertical-align' must be one of: 'bottom', 'center', 'top' but found '${arg['vertical-align']}' instead.`);
+                    }
+                    verticalAlign = context.parse(arg['vertical-align'], 1, StringType);
+                    if (!verticalAlign)
+                        return null;
+                }
                 const lastExpression = sections[sections.length - 1];
                 lastExpression.scale = scale;
                 lastExpression.font = font;
                 lastExpression.textColor = textColor;
+                lastExpression.verticalAlign = verticalAlign;
             }
             else {
                 const content = context.parse(args[i], 1, ValueType);
@@ -3103,7 +3320,7 @@ class FormatExpression {
                 if (kind !== 'string' && kind !== 'value' && kind !== 'null' && kind !== 'resolvedImage')
                     return context.error('Formatted text type must be \'string\', \'value\', \'image\' or \'null\'.');
                 nextTokenMayBeObject = true;
-                sections.push({ content, scale: null, font: null, textColor: null });
+                sections.push({ content, scale: null, font: null, textColor: null, verticalAlign: null });
             }
         }
         return new FormatExpression(sections);
@@ -3112,9 +3329,9 @@ class FormatExpression {
         const evaluateSection = section => {
             const evaluatedContent = section.content.evaluate(ctx);
             if (typeOf(evaluatedContent) === ResolvedImageType) {
-                return new FormattedSection('', evaluatedContent, null, null, null);
+                return new FormattedSection('', evaluatedContent, null, null, null, section.verticalAlign ? section.verticalAlign.evaluate(ctx) : null);
             }
-            return new FormattedSection(toString(evaluatedContent), null, section.scale ? section.scale.evaluate(ctx) : null, section.font ? section.font.evaluate(ctx).join(',') : null, section.textColor ? section.textColor.evaluate(ctx) : null);
+            return new FormattedSection(valueToString(evaluatedContent), null, section.scale ? section.scale.evaluate(ctx) : null, section.font ? section.font.evaluate(ctx).join(',') : null, section.textColor ? section.textColor.evaluate(ctx) : null, section.verticalAlign ? section.verticalAlign.evaluate(ctx) : null);
         };
         return new Formatted(this.sections.map(evaluateSection));
     }
@@ -3129,6 +3346,9 @@ class FormatExpression {
             }
             if (section.textColor) {
                 fn(section.textColor);
+            }
+            if (section.verticalAlign) {
+                fn(section.verticalAlign);
             }
         }
     }
@@ -3181,7 +3401,7 @@ class Length {
         if (!input)
             return null;
         if (input.type.kind !== 'array' && input.type.kind !== 'string' && input.type.kind !== 'value')
-            return context.error(`Expected argument of type string or array, but found ${toString$1(input.type)} instead.`);
+            return context.error(`Expected argument of type string or array, but found ${typeToString(input.type)} instead.`);
         return new Length(input);
     }
     evaluate(ctx) {
@@ -3194,7 +3414,7 @@ class Length {
             return input.length;
         }
         else {
-            throw new RuntimeError(`Expected value to be of type string or array, but found ${toString$1(typeOf(input))} instead.`);
+            throw new RuntimeError(`Expected value to be of type string or array, but found ${typeToString(typeOf(input))} instead.`);
         }
     }
     eachChild(fn) {
@@ -4239,6 +4459,37 @@ class Distance {
     }
 }
 
+class GlobalState {
+    constructor(key) {
+        this.type = ValueType;
+        this.key = key;
+    }
+    static parse(args, context) {
+        if (args.length !== 2) {
+            return context.error(`Expected 1 argument, but found ${args.length - 1} instead.`);
+        }
+        const key = args[1];
+        if (key === undefined || key === null) {
+            return context.error('Global state property must be defined.');
+        }
+        if (typeof key !== 'string') {
+            return context.error(`Global state property must be string, but found ${typeof args[1]} instead.`);
+        }
+        return new GlobalState(key);
+    }
+    evaluate(ctx) {
+        var _a;
+        const globalState = (_a = ctx.globals) === null || _a === void 0 ? void 0 : _a.globalState;
+        if (!globalState || Object.keys(globalState).length === 0)
+            return null;
+        return getOwn(globalState, this.key);
+    }
+    eachChild() { }
+    outputDefined() {
+        return false;
+    }
+}
+
 const expressions = {
     // special forms
     '==': Equals,
@@ -4276,7 +4527,8 @@ const expressions = {
     'to-string': Coercion,
     'var': Var,
     'within': Within,
-    'distance': Distance
+    'distance': Distance,
+    'global-state': GlobalState
 };
 
 class CompoundExpression {
@@ -4366,7 +4618,7 @@ class CompoundExpression {
                 const parsed = context.parse(args[i], 1 + actualTypes.length);
                 if (!parsed)
                     return null;
-                actualTypes.push(toString$1(parsed.type));
+                actualTypes.push(typeToString(parsed.type));
             }
             context.error(`Expected arguments of type ${signatures}, but found (${actualTypes.join(', ')}) instead.`);
         }
@@ -4420,10 +4672,10 @@ CompoundExpression.register(expressions, {
     'typeof': [
         StringType,
         [ValueType],
-        (ctx, [v]) => toString$1(typeOf(v.evaluate(ctx)))
+        (ctx, [v]) => typeToString(typeOf(v.evaluate(ctx)))
     ],
     'to-rgba': [
-        array$1(NumberType, 4),
+        array(NumberType, 4),
         [ColorType],
         (ctx, [v]) => {
             const [r, g, b, a] = v.evaluate(ctx).rgb;
@@ -4493,6 +4745,11 @@ CompoundExpression.register(expressions, {
         NumberType,
         [],
         (ctx) => ctx.globals.heatmapDensity || 0
+    ],
+    'elevation': [
+        NumberType,
+        [],
+        (ctx) => ctx.globals.elevation || 0
     ],
     'line-progress': [
         NumberType,
@@ -4753,23 +5010,23 @@ CompoundExpression.register(expressions, {
     ],
     'filter-type-in': [
         BooleanType,
-        [array$1(StringType)],
+        [array(StringType)],
         (ctx, [v]) => v.value.indexOf(ctx.geometryType()) >= 0
     ],
     'filter-id-in': [
         BooleanType,
-        [array$1(ValueType)],
+        [array(ValueType)],
         (ctx, [v]) => v.value.indexOf(ctx.id()) >= 0
     ],
     'filter-in-small': [
         BooleanType,
-        [StringType, array$1(ValueType)],
+        [StringType, array(ValueType)],
         // assumes v is an array literal
         (ctx, [k, v]) => v.value.indexOf(ctx.properties()[k.value]) >= 0
     ],
     'filter-in-large': [
         BooleanType,
-        [StringType, array$1(ValueType)],
+        [StringType, array(ValueType)],
         // assumes v is a array literal with values sorted in ascending order and of a single type
         (ctx, [k, v]) => binarySearch(ctx.properties()[k.value], v.value, 0, v.value.length - 1)
     ],
@@ -4841,7 +5098,7 @@ CompoundExpression.register(expressions, {
     'concat': [
         StringType,
         varargs(ValueType),
-        (ctx, args) => args.map(arg => toString(arg.evaluate(ctx))).join('')
+        (ctx, args) => args.map(arg => valueToString(arg.evaluate(ctx))).join('')
     ],
     'resolved-locale': [
         StringType,
@@ -4851,10 +5108,10 @@ CompoundExpression.register(expressions, {
 });
 function stringifySignature(signature) {
     if (Array.isArray(signature)) {
-        return `(${signature.map(toString$1).join(', ')})`;
+        return `(${signature.map(typeToString).join(', ')})`;
     }
     else {
-        return `(${toString$1(signature.type)}...)`;
+        return `(${typeToString(signature.type)}...)`;
     }
 }
 function isExpressionConstant(expression) {
@@ -4874,6 +5131,9 @@ function isExpressionConstant(expression) {
         return false;
     }
     else if (expression instanceof Distance) {
+        return false;
+    }
+    else if (expression instanceof GlobalState) {
         return false;
     }
     const isTypeAnnotation = expression instanceof Coercion ||
@@ -4897,7 +5157,7 @@ function isExpressionConstant(expression) {
         return false;
     }
     return isFeatureConstant(expression) &&
-        isGlobalPropertyConstant(expression, ['zoom', 'heatmap-density', 'line-progress', 'accumulated', 'is-supported-script']);
+        isGlobalPropertyConstant(expression, ['zoom', 'heatmap-density', 'elevation', 'line-progress', 'accumulated', 'is-supported-script']);
 }
 function isFeatureConstant(e) {
     if (e instanceof CompoundExpression) {
@@ -4999,7 +5259,7 @@ function getType(val) {
 }
 
 function isFunction(value) {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
+    return typeof value === 'object' && value !== null && !Array.isArray(value) && typeOf(value) === ObjectType;
 }
 
 class StyleExpression {
@@ -5028,7 +5288,6 @@ class StyleExpression {
         this._evaluator.formattedSection = formattedSection || null;
         try {
             const val = this.expression.evaluate(this._evaluator);
-            // eslint-disable-next-line no-self-compare
             if (val === null || val === undefined || (typeof val === 'number' && val !== val)) {
                 return this._defaultValue;
             }
@@ -5075,6 +5334,7 @@ class ZoomConstantExpression {
         this.kind = kind;
         this._styleExpression = expression;
         this.isStateDependent = kind !== 'constant' && !isStateConstant(expression.expression);
+        this.globalStateRefs = findGlobalStateRefs(expression.expression);
     }
     evaluateWithoutErrorHandling(globals, feature, featureState, canonical, availableImages, formattedSection) {
         return this._styleExpression.evaluateWithoutErrorHandling(globals, feature, featureState, canonical, availableImages, formattedSection);
@@ -5089,6 +5349,7 @@ class ZoomDependentExpression {
         this.zoomStops = zoomStops;
         this._styleExpression = expression;
         this.isStateDependent = kind !== 'camera' && !isStateConstant(expression.expression);
+        this.globalStateRefs = findGlobalStateRefs(expression.expression);
         this.interpolationType = interpolationType;
     }
     evaluateWithoutErrorHandling(globals, feature, featureState, canonical, availableImages, formattedSection) {
@@ -5178,6 +5439,15 @@ function findZoomCurve(expression) {
     });
     return result;
 }
+function findGlobalStateRefs(expression, results = new Set()) {
+    if (expression instanceof GlobalState) {
+        results.add(expression.key);
+    }
+    expression.eachChild(childExpression => {
+        findGlobalStateRefs(childExpression, results);
+    });
+    return results;
+}
 function getExpectedType(spec) {
     const types = {
         color: ColorType,
@@ -5187,11 +5457,14 @@ function getExpectedType(spec) {
         boolean: BooleanType,
         formatted: FormattedType,
         padding: PaddingType,
+        numberArray: NumberArrayType,
+        colorArray: ColorArrayType,
+        projectionDefinition: ProjectionDefinitionType,
         resolvedImage: ResolvedImageType,
         variableAnchorOffsetCollection: VariableAnchorOffsetCollectionType
     };
     if (spec.type === 'array') {
-        return array$1(types[spec.value] || ValueType, spec.length);
+        return array(types[spec.value] || ValueType, spec.length);
     }
     return types[spec.type];
 }
@@ -5202,20 +5475,21 @@ function getDefaultValue(spec) {
         // back to in case of runtime errors
         return new Color(0, 0, 0, 0);
     }
-    else if (spec.type === 'color') {
-        return Color.parse(spec.default) || null;
-    }
-    else if (spec.type === 'padding') {
-        return Padding.parse(spec.default) || null;
-    }
-    else if (spec.type === 'variableAnchorOffsetCollection') {
-        return VariableAnchorOffsetCollection.parse(spec.default) || null;
-    }
-    else if (spec.default === undefined) {
-        return null;
-    }
-    else {
-        return spec.default;
+    switch (spec.type) {
+        case 'color':
+            return Color.parse(spec.default) || null;
+        case 'padding':
+            return Padding.parse(spec.default) || null;
+        case 'numberArray':
+            return NumberArray.parse(spec.default) || null;
+        case 'colorArray':
+            return ColorArray.parse(spec.default) || null;
+        case 'variableAnchorOffsetCollection':
+            return VariableAnchorOffsetCollection.parse(spec.default) || null;
+        case 'projectionDefinition':
+            return ProjectionDefinition.parse(spec.default) || null;
+        default:
+            return (spec.default === undefined ? null : spec.default);
     }
 }
 
@@ -5234,12 +5508,13 @@ function validateObject(options) {
     }
     for (const objectKey in object) {
         const elementSpecKey = objectKey.split('.')[0]; // treat 'paint.*' as 'paint'
-        const elementSpec = elementSpecs[elementSpecKey] || elementSpecs['*'];
+        // objectKey comes from the user controlled style input, so elementSpecKey may be e.g. "__proto__"
+        const elementSpec = getOwn(elementSpecs, elementSpecKey) || elementSpecs['*'];
         let validateElement;
-        if (elementValidators[elementSpecKey]) {
+        if (getOwn(elementValidators, elementSpecKey)) {
             validateElement = elementValidators[elementSpecKey];
         }
-        else if (elementSpecs[elementSpecKey]) {
+        else if (getOwn(elementSpecs, elementSpecKey)) {
             validateElement = validateSpec;
         }
         else if (elementValidators['*']) {
@@ -5323,7 +5598,6 @@ function validateNumber(options) {
     const value = options.value;
     const valueSpec = options.valueSpec;
     let type = getType(value);
-    // eslint-disable-next-line no-self-compare
     if (type === 'number' && value !== value) {
         type = 'NaN';
     }
@@ -5779,6 +6053,9 @@ function validateLayer(options) {
     const key = options.key;
     const style = options.style;
     const styleSpec = options.styleSpec;
+    if (getType(layer) !== 'object') {
+        return [new ValidationError(key, layer, `object expected, ${getType(layer)} found`)];
+    }
     if (!layer.type && !layer.ref) {
         errors.push(new ValidationError(key, layer, 'either "type" or "ref" is required'));
     }
@@ -5830,14 +6107,17 @@ function validateLayer(options) {
             else if (sourceType !== 'raster-dem' && type === 'hillshade') {
                 errors.push(new ValidationError(key, layer.source, `layer "${layer.id}" requires a raster-dem source`));
             }
+            else if (sourceType !== 'raster-dem' && type === 'color-relief') {
+                errors.push(new ValidationError(key, layer.source, `layer "${layer.id}" requires a raster-dem source`));
+            }
             else if (sourceType === 'raster' && type !== 'raster') {
                 errors.push(new ValidationError(key, layer.source, `layer "${layer.id}" requires a vector source`));
             }
             else if (sourceType === 'vector' && !layer['source-layer']) {
                 errors.push(new ValidationError(key, layer, `layer "${layer.id}" must specify a "source-layer"`));
             }
-            else if (sourceType === 'raster-dem' && type !== 'hillshade') {
-                errors.push(new ValidationError(key, layer.source, 'raster-dem source can only be used with layer type \'hillshade\'.'));
+            else if (sourceType === 'raster-dem' && (type !== 'hillshade' && type !== 'color-relief')) {
+                errors.push(new ValidationError(key, layer.source, 'raster-dem source can only be used with layer type \'hillshade\' or \'color-relief\'.'));
             }
             else if (type === 'line' && layer.paint && layer.paint['line-gradient'] &&
                 (sourceType !== 'geojson' || !source.lineMetrics)) {
@@ -6216,6 +6496,64 @@ function validatePadding(options) {
     }
 }
 
+function validateNumberArray(options) {
+    const key = options.key;
+    const value = options.value;
+    const type = getType(value);
+    if (type === 'array') {
+        const arrayElementSpec = {
+            type: 'number'
+        };
+        if (value.length < 1) {
+            return [new ValidationError(key, value, 'array length at least 1 expected, length 0 found')];
+        }
+        let errors = [];
+        for (let i = 0; i < value.length; i++) {
+            errors = errors.concat(options.validateSpec({
+                key: `${key}[${i}]`,
+                value: value[i],
+                validateSpec: options.validateSpec,
+                valueSpec: arrayElementSpec
+            }));
+        }
+        return errors;
+    }
+    else {
+        return validateNumber({
+            key,
+            value,
+            valueSpec: {}
+        });
+    }
+}
+
+function validateColorArray(options) {
+    const key = options.key;
+    const value = options.value;
+    const type = getType(value);
+    if (type === 'array') {
+        if (value.length < 1) {
+            return [new ValidationError(key, value, 'array length at least 1 expected, length 0 found')];
+        }
+        let errors = [];
+        for (let i = 0; i < value.length; i++) {
+            errors = errors.concat(validateColor({
+                key: `${key}[${i}]`,
+                value: value[i],
+                valueSpec: {}
+            }));
+        }
+        return errors;
+    }
+    else {
+        return validateColor({
+            key,
+            value,
+            valueSpec: {}
+        });
+    }
+}
+
 function validateVariableAnchorOffsetCollection(options) {
     const key = options.key;
     const value = options.value;
@@ -6319,6 +6657,46 @@ function validateProjection(options) {
     return errors;
 }
 
+function validateProjectionDefinition(options) {
+    const key = options.key;
+    let value = options.value;
+    value = value instanceof String ? value.valueOf() : value;
+    const type = getType(value);
+    if (type === 'array' && !isProjectionDefinitionValue(value) && !isPropertyValueSpecification(value)) {
+        return [new ValidationError(key, value, `projection expected, invalid array ${JSON.stringify(value)} found`)];
+    }
+    else if (!['array', 'string'].includes(type)) {
+        return [new ValidationError(key, value, `projection expected, invalid type "${type}" found`)];
+    }
+    return [];
+}
+function isPropertyValueSpecification(value) {
+    if (['interpolate', 'step', 'literal'].includes(value[0])) {
+        return true;
+    }
+    return false;
+}
+function isProjectionDefinitionValue(value) {
+    return Array.isArray(value) &&
+        value.length === 3 &&
+        typeof value[0] === 'string' &&
+        typeof value[1] === 'string' &&
+        typeof value[2] === 'number';
+}
+
+function isObjectLiteral(anything) {
+    return Boolean(anything) && anything.constructor === Object;
+}
+
+function validateState(options) {
+    if (!isObjectLiteral(options.value)) {
+        return [
+            new ValidationError(options.key, options.value, `object expected, ${getType(options.value)} found`),
+        ];
+    }
+    return [];
+}
+
 const VALIDATORS = {
     '*'() {
         return [];
@@ -6338,12 +6716,16 @@ const VALIDATORS = {
     'sky': validateSky,
     'terrain': validateTerrain,
     'projection': validateProjection,
+    'projectionDefinition': validateProjectionDefinition,
     'string': validateString,
     'formatted': validateFormatted,
     'resolvedImage': validateImage,
     'padding': validatePadding,
+    'numberArray': validateNumberArray,
+    'colorArray': validateColorArray,
     'variableAnchorOffsetCollection': validateVariableAnchorOffsetCollection,
     'sprite': validateSprite,
+    'state': validateState
 };
 /**
  * Main recursive validation function used internally.
@@ -6402,6 +6784,9 @@ var $root = {
 		type: "array",
 		value: "number"
 	},
+	centerAltitude: {
+		type: "number"
+	},
 	zoom: {
 		type: "number"
 	},
@@ -6415,6 +6800,16 @@ var $root = {
 		type: "number",
 		"default": 0,
 		units: "degrees"
+	},
+	roll: {
+		type: "number",
+		"default": 0,
+		units: "degrees"
+	},
+	state: {
+		type: "state",
+		"default": {
+		}
 	},
 	light: {
 		type: "light"
@@ -6813,6 +7208,8 @@ var layer = {
 			},
 			hillshade: {
 			},
+			"color-relief": {
+			},
 			background: {
 			}
 		},
@@ -6856,6 +7253,7 @@ var layout = [
 	"layout_symbol",
 	"layout_raster",
 	"layout_hillshade",
+	"layout_color-relief",
 	"layout_background"
 ];
 var layout_background = {
@@ -8180,13 +8578,15 @@ var terrain = {
 };
 var projection = {
 	type: {
-		type: "enum",
+		type: "projectionDefinition",
 		"default": "mercator",
-		values: {
-			mercator: {
-			},
-			globe: {
-			}
+		"property-type": "data-constant",
+		transition: false,
+		expression: {
+			interpolated: true,
+			parameters: [
+				"zoom"
+			]
 		}
 	}
 };
@@ -8199,6 +8599,7 @@ var paint = [
 	"paint_symbol",
 	"paint_raster",
 	"paint_hillshade",
+	"paint_color-relief",
 	"paint_background"
 ];
 var paint_fill = {
@@ -9174,10 +9575,24 @@ var paint_raster = {
 };
 var paint_hillshade = {
 	"hillshade-illumination-direction": {
-		type: "number",
+		type: "numberArray",
 		"default": 335,
 		minimum: 0,
 		maximum: 359,
+		transition: false,
+		expression: {
+			interpolated: true,
+			parameters: [
+				"zoom"
+			]
+		},
+		"property-type": "data-constant"
+	},
+	"hillshade-illumination-altitude": {
+		type: "numberArray",
+		"default": 45,
+		minimum: 0,
+		maximum: 90,
 		transition: false,
 		expression: {
 			interpolated: true,
@@ -9219,7 +9634,7 @@ var paint_hillshade = {
 		"property-type": "data-constant"
 	},
 	"hillshade-shadow-color": {
-		type: "color",
+		type: "colorArray",
 		"default": "#000000",
 		transition: true,
 		expression: {
@@ -9231,7 +9646,7 @@ var paint_hillshade = {
 		"property-type": "data-constant"
 	},
 	"hillshade-highlight-color": {
-		type: "color",
+		type: "colorArray",
 		"default": "#FFFFFF",
 		transition: true,
 		expression: {
@@ -9248,6 +9663,29 @@ var paint_hillshade = {
 		transition: true,
 		expression: {
 			interpolated: true,
+			parameters: [
+				"zoom"
+			]
+		},
+		"property-type": "data-constant"
+	},
+	"hillshade-method": {
+		type: "enum",
+		values: {
+			standard: {
+			},
+			basic: {
+			},
+			combined: {
+			},
+			igor: {
+			},
+			multidirectional: {
+			}
+		},
+		"default": "standard",
+		expression: {
+			interpolated: false,
 			parameters: [
 				"zoom"
 			]
@@ -9352,6 +9790,19 @@ var v8Spec = {
 	layout_symbol: layout_symbol,
 	layout_raster: layout_raster,
 	layout_hillshade: layout_hillshade,
+	"layout_color-relief": {
+	visibility: {
+		type: "enum",
+		values: {
+			visible: {
+			},
+			none: {
+			}
+		},
+		"default": "visible",
+		"property-type": "constant"
+	}
+},
 	filter: filter,
 	filter_operator: filter_operator,
 	geometry_type: geometry_type,
@@ -9549,6 +10000,33 @@ var v8Spec = {
 	paint_symbol: paint_symbol,
 	paint_raster: paint_raster,
 	paint_hillshade: paint_hillshade,
+	"paint_color-relief": {
+	"color-relief-opacity": {
+		type: "number",
+		"default": 1,
+		minimum: 0,
+		maximum: 1,
+		transition: true,
+		expression: {
+			interpolated: true,
+			parameters: [
+				"zoom"
+			]
+		},
+		"property-type": "data-constant"
+	},
+	"color-relief-color": {
+		type: "color",
+		transition: false,
+		expression: {
+			interpolated: true,
+			parameters: [
+				"elevation"
+			]
+		},
+		"property-type": "color-ramp"
+	}
+},
 	paint_background: paint_background,
 	transition: transition,
 	"property-type": {
@@ -9634,6 +10112,7 @@ validateStyleMin.glyphs = wrapCleanErrors(injectValidateSpec(validateGlyphsUrl))
 validateStyleMin.light = wrapCleanErrors(injectValidateSpec(validateLight));
 validateStyleMin.sky = wrapCleanErrors(injectValidateSpec(validateSky));
 validateStyleMin.terrain = wrapCleanErrors(injectValidateSpec(validateTerrain));
+validateStyleMin.state = wrapCleanErrors(injectValidateSpec(validateState));
 validateStyleMin.layer = wrapCleanErrors(injectValidateSpec(validateLayer));
 validateStyleMin.filter = wrapCleanErrors(injectValidateSpec(validateFilter));
 validateStyleMin.paintProperty = wrapCleanErrors(injectValidateSpec(validatePaintProperty));
