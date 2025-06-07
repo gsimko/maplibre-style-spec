@@ -806,6 +806,14 @@
             }
           }
         },
+        "contour": {
+          "doc": "Client-side contour visualization based on DEM data.",
+          "sdk-support": {
+            "basic functionality": {
+              "js": "0.43.0"
+            }
+          }
+        },
         "hillshade": {
           "doc": "Client-side hillshading visualization based on DEM data. The implementation supports Mapbox Terrain RGB, Mapzen Terrarium tiles and custom encodings.",
           "sdk-support": {
@@ -895,8 +903,32 @@
     "layout_raster",
     "layout_hillshade",
     "layout_color-relief",
-    "layout_background"
+    "layout_background",
+    "layout_contour"
   ],
+  "layout_contour": {
+    "visibility": {
+      "type": "enum",
+      "values": {
+        "visible": {
+          "doc": "The layer is shown."
+        },
+        "none": {
+          "doc": "The layer is not shown."
+        }
+      },
+      "default": "visible",
+      "doc": "Whether this layer is displayed.",
+      "sdk-support": {
+        "basic functionality": {
+          "js": "0.10.0",
+          "android": "2.0.1",
+          "ios": "2.0.0"
+        }
+      },
+      "property-type": "constant"
+    }
+  },
   "layout_background": {
     "visibility": {
       "type": "enum",
@@ -5686,7 +5718,8 @@
     "paint_raster",
     "paint_hillshade",
     "paint_color-relief",
-    "paint_background"
+    "paint_background",
+    "paint_contour"
   ],
   "paint_fill": {
     "fill-antialias": {
@@ -7758,6 +7791,160 @@
         ]
       },
       "property-type": "color-ramp"
+    }
+  },
+  "paint_contour": {
+    "contour-minor-color": {
+      "type": "color",
+      "default": "#A0A0A0",
+      "doc": "The color with which the contour will be drawn.",
+      "transition": true,
+      "sdk-support": {
+        "basic functionality": {
+          "js": "0.10.0"
+        }
+      },
+      "expression": {
+        "interpolated": true,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
+    },
+    "contour-major-color": {
+      "type": "color",
+      "default": "#A0A0A0",
+      "doc": "The color with which the contour will be drawn.",
+      "transition": true,
+      "sdk-support": {
+        "basic functionality": {
+          "js": "0.10.0"
+        }
+      },
+      "expression": {
+        "interpolated": true,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
+    },
+    "contour-minor-opacity": {
+      "type": "number",
+      "default": 0.25,
+      "minimum": 0,
+      "maximum": 1,
+      "units": "pixels",
+      "transition": true,
+      "sdk-support": {
+        "basic functionality": {
+          "js": "0.10.0"
+        }
+      },
+      "expression": {
+        "interpolated": true,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
+    },
+    "contour-major-opacity": {
+      "type": "number",
+      "default": 0.25,
+      "minimum": 0,
+      "maximum": 1,
+      "units": "pixels",
+      "transition": true,
+      "sdk-support": {
+        "basic functionality": {
+          "js": "0.10.0"
+        }
+      },
+      "expression": {
+        "interpolated": true,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
+    },
+    "contour-minor-line-width": {
+      "type": "number",
+      "default": 0.2,
+      "minimum": 0,
+      "units": "pixels",
+      "transition": true,
+      "sdk-support": {
+        "basic functionality": {
+          "js": "0.10.0"
+        }
+      },
+      "expression": {
+        "interpolated": true,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
+    },
+    "contour-major-line-width": {
+      "type": "number",
+      "default": 0.2,
+      "minimum": 0,
+      "units": "pixels",
+      "transition": true,
+      "sdk-support": {
+        "basic functionality": {
+          "js": "0.10.0"
+        }
+      },
+      "expression": {
+        "interpolated": true,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
+    },
+    "contour-minor-spacing": {
+      "type": "number",
+      "default": 10,
+      "minimum": 0,
+      "units": "pixels",
+      "transition": true,
+      "sdk-support": {
+        "basic functionality": {
+          "js": "0.10.0"
+        }
+      },
+      "expression": {
+        "interpolated": true,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
+    },
+    "contour-major-spacing": {
+      "type": "number",
+      "default": 50,
+      "minimum": 0,
+      "units": "pixels",
+      "transition": true,
+      "sdk-support": {
+        "basic functionality": {
+          "js": "0.10.0"
+        }
+      },
+      "expression": {
+        "interpolated": true,
+        "parameters": [
+          "zoom"
+        ]
+      },
+      "property-type": "data-constant"
     }
   },
   "paint_background": {
