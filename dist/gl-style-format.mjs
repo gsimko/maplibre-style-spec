@@ -710,6 +710,8 @@ var layer = {
 			},
 			raster: {
 			},
+			contour: {
+			},
 			hillshade: {
 			},
 			"color-relief": {
@@ -758,8 +760,22 @@ var layout = [
 	"layout_raster",
 	"layout_hillshade",
 	"layout_color-relief",
-	"layout_background"
+	"layout_background",
+	"layout_contour"
 ];
+var layout_contour = {
+	visibility: {
+		type: "enum",
+		values: {
+			visible: {
+			},
+			none: {
+			}
+		},
+		"default": "visible",
+		"property-type": "constant"
+	}
+};
 var layout_background = {
 	visibility: {
 		type: "enum",
@@ -2104,7 +2120,8 @@ var paint = [
 	"paint_raster",
 	"paint_hillshade",
 	"paint_color-relief",
-	"paint_background"
+	"paint_background",
+	"paint_contour"
 ];
 var paint_fill = {
 	"fill-antialias": {
@@ -3197,6 +3214,20 @@ var paint_hillshade = {
 		"property-type": "data-constant"
 	}
 };
+var paint_contour = {
+	"contour-color": {
+		type: "color",
+		"default": "#A0A0A0",
+		transition: true,
+		expression: {
+			interpolated: true,
+			parameters: [
+				"zoom"
+			]
+		},
+		"property-type": "data-constant"
+	}
+};
 var paint_background = {
 	"background-color": {
 		type: "color",
@@ -3273,6 +3304,7 @@ var latest = {
 	source_image: source_image,
 	layer: layer,
 	layout: layout,
+	layout_contour: layout_contour,
 	layout_background: layout_background,
 	layout_fill: layout_fill,
 	layout_circle: layout_circle,
@@ -3531,6 +3563,7 @@ var latest = {
 		"property-type": "color-ramp"
 	}
 },
+	paint_contour: paint_contour,
 	paint_background: paint_background,
 	transition: transition,
 	"property-type": {

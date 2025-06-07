@@ -941,6 +941,22 @@ export type RasterLayerSpecification = {
 		"raster-fade-duration"?: PropertyValueSpecification<number>;
 	};
 };
+export type ContourLayerSpecification = {
+	"id": string;
+	"type": "contour";
+	"metadata"?: unknown;
+	"source": string;
+	"source-layer"?: string;
+	"minzoom"?: number;
+	"maxzoom"?: number;
+	"filter"?: FilterSpecification;
+	"layout"?: {
+		"visibility"?: "visible" | "none";
+	};
+	"paint"?: {
+		"contour-color"?: PropertyValueSpecification<ColorSpecification>;
+	};
+};
 export type HillshadeLayerSpecification = {
 	"id": string;
 	"type": "hillshade";
@@ -996,7 +1012,7 @@ export type BackgroundLayerSpecification = {
 		"background-opacity"?: PropertyValueSpecification<number>;
 	};
 };
-export type LayerSpecification = FillLayerSpecification | LineLayerSpecification | SymbolLayerSpecification | CircleLayerSpecification | HeatmapLayerSpecification | FillExtrusionLayerSpecification | RasterLayerSpecification | HillshadeLayerSpecification | ColorReliefLayerSpecification | BackgroundLayerSpecification;
+export type LayerSpecification = FillLayerSpecification | LineLayerSpecification | SymbolLayerSpecification | CircleLayerSpecification | HeatmapLayerSpecification | FillExtrusionLayerSpecification | RasterLayerSpecification | ContourLayerSpecification | HillshadeLayerSpecification | ColorReliefLayerSpecification | BackgroundLayerSpecification;
 /**
  * Operations that can be performed by the diff.
  * Below are the operations and their arguments, the arguments should be aligned with the style methods in maplibre-gl-js.
@@ -2664,6 +2680,14 @@ export declare function validateStyleMin(style: StyleSpecification, styleSpec?: 
 						};
 					};
 				};
+				contour: {
+					doc: string;
+					"sdk-support": {
+						"basic functionality": {
+							js: string;
+						};
+					};
+				};
 				hillshade: {
 					doc: string;
 					"sdk-support": {
@@ -2744,6 +2768,29 @@ export declare function validateStyleMin(style: StyleSpecification, styleSpec?: 
 		};
 	};
 	layout: string[];
+	layout_contour: {
+		visibility: {
+			type: string;
+			values: {
+				visible: {
+					doc: string;
+				};
+				none: {
+					doc: string;
+				};
+			};
+			default: string;
+			doc: string;
+			"sdk-support": {
+				"basic functionality": {
+					js: string;
+					android: string;
+					ios: string;
+				};
+			};
+			"property-type": string;
+		};
+	};
 	layout_background: {
 		visibility: {
 			type: string;
@@ -8419,6 +8466,24 @@ export declare function validateStyleMin(style: StyleSpecification, styleSpec?: 
 					ios: string;
 				};
 				"data-driven styling": {};
+			};
+			expression: {
+				interpolated: boolean;
+				parameters: string[];
+			};
+			"property-type": string;
+		};
+	};
+	paint_contour: {
+		"contour-color": {
+			type: string;
+			default: string;
+			doc: string;
+			transition: boolean;
+			"sdk-support": {
+				"basic functionality": {
+					js: string;
+				};
 			};
 			expression: {
 				interpolated: boolean;

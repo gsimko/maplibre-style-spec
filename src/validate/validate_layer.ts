@@ -1,12 +1,12 @@
 
-import {ValidationError} from '../error/validation_error';
-import {unbundle} from '../util/unbundle_jsonlint';
-import {validateObject} from './validate_object';
-import {validateFilter} from './validate_filter';
-import {validatePaintProperty} from './validate_paint_property';
-import {validateLayoutProperty} from './validate_layout_property';
-import {extendBy as extend} from '../util/extend';
-import {getType} from '../util/get_type';
+import { ValidationError } from '../error/validation_error';
+import { unbundle } from '../util/unbundle_jsonlint';
+import { validateObject } from './validate_object';
+import { validateFilter } from './validate_filter';
+import { validatePaintProperty } from './validate_paint_property';
+import { validateLayoutProperty } from './validate_layout_property';
+import { extendBy as extend } from '../util/extend';
+import { getType } from '../util/get_type';
 
 export function validateLayer(options) {
     let errors = [];
@@ -56,7 +56,7 @@ export function validateLayer(options) {
         } else {
             type = unbundle(parent.type);
         }
-    } else if (type !== 'background') {
+    } else if (type !== 'background' && type !== 'contour') {
         if (!layer.source) {
             errors.push(new ValidationError(key, layer, 'missing required property "source"'));
         } else {
@@ -77,7 +77,7 @@ export function validateLayer(options) {
             } else if (sourceType === 'raster-dem' && (type !== 'hillshade' && type !== 'color-relief')) {
                 errors.push(new ValidationError(key, layer.source, 'raster-dem source can only be used with layer type \'hillshade\' or \'color-relief\'.'));
             } else if (type === 'line' && layer.paint && layer.paint['line-gradient'] &&
-                       (sourceType !== 'geojson' || !source.lineMetrics)) {
+                (sourceType !== 'geojson' || !source.lineMetrics)) {
                 errors.push(new ValidationError(key, layer, `layer "${layer.id}" specifies a line-gradient, which requires a GeoJSON source with \`lineMetrics\` enabled.`));
             }
         }
@@ -119,7 +119,7 @@ export function validateLayer(options) {
                     validateSpec: options.validateSpec,
                     objectElementValidators: {
                         '*'(options) {
-                            return validateLayoutProperty(extend({layerType: type}, options));
+                            return validateLayoutProperty(extend({ layerType: type }, options));
                         }
                     }
                 });
@@ -134,7 +134,7 @@ export function validateLayer(options) {
                     validateSpec: options.validateSpec,
                     objectElementValidators: {
                         '*'(options) {
-                            return validatePaintProperty(extend({layerType: type}, options));
+                            return validatePaintProperty(extend({ layerType: type }, options));
                         }
                     }
                 });
