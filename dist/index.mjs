@@ -5972,84 +5972,94 @@ function getDefaultExportFromCjs (x) {
 	return x && x.__esModule && Object.prototype.hasOwnProperty.call(x, 'default') ? x['default'] : x;
 }
 
-var unitbezier = UnitBezier;
+var unitbezier;
+var hasRequiredUnitbezier;
 
-function UnitBezier(p1x, p1y, p2x, p2y) {
-    // Calculate the polynomial coefficients, implicit first and last control points are (0,0) and (1,1).
-    this.cx = 3.0 * p1x;
-    this.bx = 3.0 * (p2x - p1x) - this.cx;
-    this.ax = 1.0 - this.cx - this.bx;
+function requireUnitbezier () {
+	if (hasRequiredUnitbezier) return unitbezier;
+	hasRequiredUnitbezier = 1;
 
-    this.cy = 3.0 * p1y;
-    this.by = 3.0 * (p2y - p1y) - this.cy;
-    this.ay = 1.0 - this.cy - this.by;
+	unitbezier = UnitBezier;
 
-    this.p1x = p1x;
-    this.p1y = p1y;
-    this.p2x = p2x;
-    this.p2y = p2y;
+	function UnitBezier(p1x, p1y, p2x, p2y) {
+	    // Calculate the polynomial coefficients, implicit first and last control points are (0,0) and (1,1).
+	    this.cx = 3.0 * p1x;
+	    this.bx = 3.0 * (p2x - p1x) - this.cx;
+	    this.ax = 1.0 - this.cx - this.bx;
+
+	    this.cy = 3.0 * p1y;
+	    this.by = 3.0 * (p2y - p1y) - this.cy;
+	    this.ay = 1.0 - this.cy - this.by;
+
+	    this.p1x = p1x;
+	    this.p1y = p1y;
+	    this.p2x = p2x;
+	    this.p2y = p2y;
+	}
+
+	UnitBezier.prototype = {
+	    sampleCurveX: function (t) {
+	        // `ax t^3 + bx t^2 + cx t' expanded using Horner's rule.
+	        return ((this.ax * t + this.bx) * t + this.cx) * t;
+	    },
+
+	    sampleCurveY: function (t) {
+	        return ((this.ay * t + this.by) * t + this.cy) * t;
+	    },
+
+	    sampleCurveDerivativeX: function (t) {
+	        return (3.0 * this.ax * t + 2.0 * this.bx) * t + this.cx;
+	    },
+
+	    solveCurveX: function (x, epsilon) {
+	        if (epsilon === undefined) epsilon = 1e-6;
+
+	        if (x < 0.0) return 0.0;
+	        if (x > 1.0) return 1.0;
+
+	        var t = x;
+
+	        // First try a few iterations of Newton's method - normally very fast.
+	        for (var i = 0; i < 8; i++) {
+	            var x2 = this.sampleCurveX(t) - x;
+	            if (Math.abs(x2) < epsilon) return t;
+
+	            var d2 = this.sampleCurveDerivativeX(t);
+	            if (Math.abs(d2) < 1e-6) break;
+
+	            t = t - x2 / d2;
+	        }
+
+	        // Fall back to the bisection method for reliability.
+	        var t0 = 0.0;
+	        var t1 = 1.0;
+	        t = x;
+
+	        for (i = 0; i < 20; i++) {
+	            x2 = this.sampleCurveX(t);
+	            if (Math.abs(x2 - x) < epsilon) break;
+
+	            if (x > x2) {
+	                t0 = t;
+	            } else {
+	                t1 = t;
+	            }
+
+	            t = (t1 - t0) * 0.5 + t0;
+	        }
+
+	        return t;
+	    },
+
+	    solve: function (x, epsilon) {
+	        return this.sampleCurveY(this.solveCurveX(x, epsilon));
+	    }
+	};
+	return unitbezier;
 }
 
-UnitBezier.prototype = {
-    sampleCurveX: function (t) {
-        // `ax t^3 + bx t^2 + cx t' expanded using Horner's rule.
-        return ((this.ax * t + this.bx) * t + this.cx) * t;
-    },
-
-    sampleCurveY: function (t) {
-        return ((this.ay * t + this.by) * t + this.cy) * t;
-    },
-
-    sampleCurveDerivativeX: function (t) {
-        return (3.0 * this.ax * t + 2.0 * this.bx) * t + this.cx;
-    },
-
-    solveCurveX: function (x, epsilon) {
-        if (epsilon === undefined) epsilon = 1e-6;
-
-        if (x < 0.0) return 0.0;
-        if (x > 1.0) return 1.0;
-
-        var t = x;
-
-        // First try a few iterations of Newton's method - normally very fast.
-        for (var i = 0; i < 8; i++) {
-            var x2 = this.sampleCurveX(t) - x;
-            if (Math.abs(x2) < epsilon) return t;
-
-            var d2 = this.sampleCurveDerivativeX(t);
-            if (Math.abs(d2) < 1e-6) break;
-
-            t = t - x2 / d2;
-        }
-
-        // Fall back to the bisection method for reliability.
-        var t0 = 0.0;
-        var t1 = 1.0;
-        t = x;
-
-        for (i = 0; i < 20; i++) {
-            x2 = this.sampleCurveX(t);
-            if (Math.abs(x2 - x) < epsilon) break;
-
-            if (x > x2) {
-                t0 = t;
-            } else {
-                t1 = t;
-            }
-
-            t = (t1 - t0) * 0.5 + t0;
-        }
-
-        return t;
-    },
-
-    solve: function (x, epsilon) {
-        return this.sampleCurveY(this.solveCurveX(x, epsilon));
-    }
-};
-
-var UnitBezier$1 = /*@__PURE__*/getDefaultExportFromCjs(unitbezier);
+var unitbezierExports = requireUnitbezier();
+var UnitBezier = /*@__PURE__*/getDefaultExportFromCjs(unitbezierExports);
 
 class Interpolate {
     constructor(type, operator, interpolation, input, stops) {
@@ -6074,7 +6084,7 @@ class Interpolate {
         }
         else if (interpolation.name === 'cubic-bezier') {
             const c = interpolation.controlPoints;
-            const ub = new UnitBezier$1(c[0], c[1], c[2], c[3]);
+            const ub = new UnitBezier(c[0], c[1], c[2], c[3]);
             t = ub.solve(exponentialInterpolation(input, 1, lower, upper));
         }
         return t;
@@ -7165,27 +7175,35 @@ class TinyQueue {
     }
 }
 
-function quickselect(arr, k, left, right, compare) {
-    quickselectStep(arr, k, left, right || (arr.length - 1), compare || defaultCompare);
-}
-
-function quickselectStep(arr, k, left, right, compare) {
+/**
+ * Rearranges items so that all items in the [left, k] are the smallest.
+ * The k-th element will have the (k - left + 1)-th smallest value in [left, right].
+ *
+ * @template T
+ * @param {T[]} arr the array to partially sort (in place)
+ * @param {number} k middle index for partial sorting (as defined above)
+ * @param {number} [left=0] left index of the range to sort
+ * @param {number} [right=arr.length-1] right index
+ * @param {(a: T, b: T) => number} [compare = (a, b) => a - b] compare function
+ */
+function quickselect(arr, k, left = 0, right = arr.length - 1, compare = defaultCompare) {
 
     while (right > left) {
         if (right - left > 600) {
-            var n = right - left + 1;
-            var m = k - left + 1;
-            var z = Math.log(n);
-            var s = 0.5 * Math.exp(2 * z / 3);
-            var sd = 0.5 * Math.sqrt(z * s * (n - s) / n) * (m - n / 2 < 0 ? -1 : 1);
-            var newLeft = Math.max(left, Math.floor(k - m * s / n + sd));
-            var newRight = Math.min(right, Math.floor(k + (n - m) * s / n + sd));
-            quickselectStep(arr, k, newLeft, newRight, compare);
+            const n = right - left + 1;
+            const m = k - left + 1;
+            const z = Math.log(n);
+            const s = 0.5 * Math.exp(2 * z / 3);
+            const sd = 0.5 * Math.sqrt(z * s * (n - s) / n) * (m - n / 2 < 0 ? -1 : 1);
+            const newLeft = Math.max(left, Math.floor(k - m * s / n + sd));
+            const newRight = Math.min(right, Math.floor(k + (n - m) * s / n + sd));
+            quickselect(arr, k, newLeft, newRight, compare);
         }
 
-        var t = arr[k];
-        var i = left;
-        var j = right;
+        const t = arr[k];
+        let i = left;
+        /** @type {number} */
+        let j = right;
 
         swap(arr, left, k);
         if (compare(arr[right], t) > 0) swap(arr, left, right);
@@ -7209,12 +7227,24 @@ function quickselectStep(arr, k, left, right, compare) {
     }
 }
 
+/**
+ * @template T
+ * @param {T[]} arr
+ * @param {number} i
+ * @param {number} j
+ */
 function swap(arr, i, j) {
-    var tmp = arr[i];
+    const tmp = arr[i];
     arr[i] = arr[j];
     arr[j] = tmp;
 }
 
+/**
+ * @template T
+ * @param {T} a
+ * @param {T} b
+ * @returns {number}
+ */
 function defaultCompare(a, b) {
     return a < b ? -1 : a > b ? 1 : 0;
 }
@@ -10230,7 +10260,6 @@ function validateFunction(options) {
             errors = errors.concat(validateStopDomainValue({
                 key: `${key}[0]`,
                 value: value[0],
-                valueSpec: {},
                 validateSpec: options.validateSpec,
                 style: options.style,
                 styleSpec: options.styleSpec
@@ -10764,13 +10793,11 @@ function validateSource(options) {
                     errors.push(...validateExpression({
                         key: `${key}.${prop}.map`,
                         value: mapExpr,
-                        validateSpec,
                         expressionContext: 'cluster-map'
                     }));
                     errors.push(...validateExpression({
                         key: `${key}.${prop}.reduce`,
                         value: reduceExpr,
-                        validateSpec,
                         expressionContext: 'cluster-reduce'
                     }));
                 }
@@ -10800,11 +10827,7 @@ function validateSource(options) {
             return validateEnum({
                 key: `${key}.type`,
                 value: value.type,
-                valueSpec: { values: ['vector', 'raster', 'raster-dem', 'geojson', 'video', 'image'] },
-                style,
-                validateSpec,
-                styleSpec
-            });
+                valueSpec: { values: ['vector', 'raster', 'raster-dem', 'geojson', 'video', 'image'] }});
     }
 }
 function validatePromoteId({ key, value }) {
@@ -11013,18 +11036,14 @@ function validateColorArray(options) {
         for (let i = 0; i < value.length; i++) {
             errors = errors.concat(validateColor({
                 key: `${key}[${i}]`,
-                value: value[i],
-                valueSpec: {}
-            }));
+                value: value[i]}));
         }
         return errors;
     }
     else {
         return validateColor({
             key,
-            value,
-            valueSpec: {}
-        });
+            value});
     }
 }
 
@@ -11285,11 +11304,7 @@ function validateStyleMin(style, styleSpec = v8Spec) {
     if (style['constants']) {
         errors = errors.concat(validateConstants({
             key: 'constants',
-            value: style['constants'],
-            style,
-            styleSpec,
-            validateSpec: validate,
-        }));
+            value: style['constants']}));
     }
     return sortErrors(errors);
 }

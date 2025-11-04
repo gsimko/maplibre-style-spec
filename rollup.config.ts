@@ -1,11 +1,12 @@
 import replace from '@rollup/plugin-replace';
 import commonjs from '@rollup/plugin-commonjs';
-import {RollupOptions} from 'rollup';
+import { RollupOptions } from 'rollup';
 import resolve from '@rollup/plugin-node-resolve';
 import typescript from '@rollup/plugin-typescript';
 import json from '@rollup/plugin-json';
 import minifyStyleSpec from './build/rollup_plugin_minify_style_spec';
 import shebang from 'rollup-plugin-preserve-shebang';
+import { visualizer } from 'rollup-plugin-visualizer';
 
 const rollupPlugins = [
     minifyStyleSpec(),
@@ -42,7 +43,10 @@ const config: RollupOptions[] = [{
             fs: 'fs'
         }
     }],
-    plugins: rollupPlugins
+    plugins: [
+        ...rollupPlugins,
+        visualizer({ filename: `dist/index.stats.html` }),
+    ]
 },
 {
     input: './bin/gl-style-format.ts',
